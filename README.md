@@ -1,8 +1,26 @@
 # cicwave
 
-Advanced waveform viewer with PyQtGraph backend for high-performance visualization of simulation data.
+Waveform viewer with PyQtGraph backend for high-performance visualization of simulation data.
 
-cicwave is a standalone package extracted from [cicsim](https://github.com/wulffern/cicsim), focused on providing the best possible waveform viewing experience with PyQtGraph and Qt6.
+cicwave is a standalone package extracted from
+[cicsim](https://github.com/wulffern/cicsim), focused on providing the 
+best possible waveform viewing experience with PyQtGraph and Qt6.
+
+## Background
+
+I made my first waveform viewer (<https://github.com/wulffern/NextGenLab.Chart>)
+back in 2001 during a summer internship. NextGenLab.Chart evolved into
+<https://github.com/wulffern/SystemDotNet.Report> during my Ph.D. In I always
+had in my plan to port SdnReport to Mac and Linux, but I never really did (no
+coding time). 
+
+In December 2023 I needed a waveform viewer for cicsim (read ngspice raw files),
+so I wrote one by hand. It was pretty basic. 
+
+Enter March 2026, and the advent of agentic coding. It was finally possible to
+revive SdnReport in the form of a Qt port to cicwave. Initially it lived inside
+cicsim, however, in May 2026 it became clear that cicwave deserved it's own
+repo. As such, you're here. 
 
 ## Features
 
