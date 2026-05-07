@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cicwave"
+version = "1.0.0"
+authors = [
+  { name="Carsten Wulff", email="carsten@wulff.no" },
+]
+dependencies = [
+    "numpy",           # Core data arrays
+    "pandas",          # DataFrames  
+    "matplotlib",      # Engineering formatters (minimal dependency)
+    "click",           # CLI parsing
+    "pyyaml",          # Session files, pivot specs
+    "PySide6",         # Qt6 GUI framework  
+    "pyqtgraph",       # High-performance plotting
+    "PyOpenGL",        # GPU acceleration
+]
+description = "Advanced waveform viewer with PyQtGraph backend"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.8"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Utilities",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+    "Topic :: Scientific/Engineering :: Visualization",
+]
+
+[project.optional-dependencies]  
+parquet = ["pyarrow"]     # Parquet file support
+hdf5 = ["tables"]         # HDF5 file support
+
+[project.scripts]
+cicwave = "cicwave.cli:main"
+
+[project.gui-scripts]  
+cicwavew = "cicwave.cli:main"  # Windows no-console wrapper
+
+[project.urls]
+"Homepage" = "https://github.com/wulffern/cicwave"
+"Bug Tracker" = "https://github.com/wulffern/cicwave/issues"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
