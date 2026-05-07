@@ -47,10 +47,17 @@ jobs:
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
       
+      - name: Install package and dependencies
+        if: steps.check-pypi.outputs.exists == 'false'
+        run: |
+          # Install package with all dependencies for testing
+          # Use --no-deps for PySide6/PyOpenGL which aren't needed for unit tests
+          pip install numpy pandas matplotlib click pyyaml
+          pip install -e . --no-deps
+
       - name: Run tests
         if: steps.check-pypi.outputs.exists == 'false'
         run: |
-          # Run unit tests if they exist
           if [ -d "tests/unittests" ]; then
             python -m unittest discover -s tests/unittests/ -p 'test_*.py' -v
           else
