@@ -27,10 +27,15 @@ repo. As such, you're here.
 - **High-performance rendering** with PyQtGraph and GPU acceleration
 - **Multiple file format support**: 
   - ngspice `.raw` files
-  - CSV, TSV, Excel spreadsheets
+  - Xyce `.prn` print waveform files
+  - Whitespace-separated text (`.dat`, `.spe`, `.cou`, `.chi`)
+  - CSV, TSV, plain `.txt`, Excel, OpenDocument spreadsheets
   - Parquet, HDF5, Feather for big data
+  - JSON, HTML, XML, fixed-width tables
+  - Pickle (`.pkl`) for cached DataFrames
   - VCD digital waveforms 
   - LitePoint `.iqvsa` IQ capture files
+  - Statistical formats: Stata (`.dta`), SAS (`.sas7bdat`), SPSS (`.sav`)
 - **Multi-dimensional data pivoting** with YAML specifications
 - **Digital waveform support** with separate analog/digital panes  
 - **Session save/restore** with `.cicwave.yaml` files
@@ -67,6 +72,16 @@ cicwave sim1.csv sim2.csv results.xlsx
 
 # Glob patterns (useful on PowerShell)
 cicwave --glob "results/*.csv" --glob "**/*.raw"
+
+# Force a CSV delimiter (disables auto-sniffing for this run)
+cicwave --csv-sep ';' european_data.csv
+cicwave --csv-sep tab measurements.csv
+
+# Strip comment lines from text files (CSV/TSV/.dat/.spe/.cou/.chi)
+cicwave --csv-comment '#' results.csv          # strip '#' banners
+cicwave --csv-comment '*' spice_log.csv        # SPICE-style comments
+cicwave --csv-comment '//' c_style_dump.csv    # multi-char marker
+cicwave --csv-comment '' eldo.cou              # disable default for .cou
 ```
 
 ### Advanced Features
@@ -93,15 +108,54 @@ cicwave --pivot spec.yaml --pivot-info data.csv
 
 ## File Format Support
 
+cicwave dispatches on file extension. Any extension not listed below falls
+through to the ngspice raw reader, so non-standard suffixes (e.g. `.raw0`,
+`.bin`) on ngspice output usually still work.
+
+### Simulation / measurement formats
+
 | Format | Extension | Description |
 |--------|-----------|-------------|
-| ngspice | `.raw` | Binary simulation results |
-| CSV/TSV | `.csv`, `.tsv` | Comma/tab separated values |
-| Excel | `.xlsx` | Spreadsheet format |
+| ngspice raw | `.raw` (and unknown extensions) | Binary simulation results, parsed by `ngraw.py` |
+| Xyce print | `.prn` | Sandia Xyce print/probe waveform output |
+| Whitespace text | `.dat`, `.spe`, `.cou`, `.chi` | Eldo `.cou`/`.chi`, ngspice `.dat`, generic space/tab columns; `#` comments stripped by default |
+| VCD | `.vcd` | Value Change Dump — digital simulation waveforms |
+| LitePoint IQ | `.iqvsa` | LitePoint IQxstream / IQfact IQ capture data |
+
+### Tabular text formats
+
+| Format | Extension | Description |
+|--------|-----------|-------------|
+| CSV | `.csv` | Delimiter auto-detected from `, ; \t |` (override with `--csv-sep`; pyarrow when available) |
+| TSV | `.tsv`, `.txt` | Tab separated values |
+| Fixed-width | `.fwf` | Fixed-width columnar text (`pandas.read_fwf`) |
+| HTML | `.html` | First `<table>` in the document |
+| XML | `.xml` | `pandas.read_xml` |
+| JSON | `.json` | `pandas.read_json` records |
+
+### Spreadsheet formats
+
+| Format | Extension | Description |
+|--------|-----------|-------------|
+| Excel | `.xlsx`, `.xls` | Microsoft Excel workbooks (sheet selectable) |
+| OpenDocument | `.ods` | LibreOffice / OpenOffice spreadsheets (requires `odfpy`) |
+
+### Big-data / binary formats
+
+| Format | Extension | Description |
+|--------|-----------|-------------|
 | Parquet | `.parquet` | Columnar storage (requires `pip install pyarrow`) |
-| HDF5 | `.h5` | Hierarchical data (requires `pip install tables`) |
-| VCD | `.vcd` | Digital simulation waveforms |
-| LitePoint | `.iqvsa` | IQ capture data |
+| Feather | `.feather` | Arrow IPC file format (requires `pip install pyarrow`) |
+| HDF5 | `.h5`, `.hdf5` | Hierarchical data (requires `pip install tables`) |
+| Pickle | `.pkl`, `.pickle` | Serialized pandas DataFrame |
+
+### Statistical packages
+
+| Format | Extension | Description |
+|--------|-----------|-------------|
+| Stata | `.dta`, `.stata` | Stata data files (`pandas.read_stata`) |
+| SAS | `.sas7bdat` | SAS transport/data files (`pandas.read_sas`) |
+| SPSS | `.sav` | SPSS data files (requires `pyreadstat`) |
 
 ## Environment Variables
 
@@ -117,10 +171,51 @@ cicwave --pivot spec.yaml --pivot-info data.csv
 - **Ctrl+Mouse wheel**: Zoom X-axis only
 
 ### Analysis Tools
-- **Cursors**: Measure time/voltage differences
-- **Math expressions**: Create derived signals  
-- **Digital analysis**: View bus values and timing
-- **Export data**: Save currently visible waveforms
+
+Right-click a trace in the wave tree for the analysis menu:
+
+- **Cursors**: A/B markers measure time / voltage differences
+- **FFT / PSD**: Hanning-windowed spectrum (peak-normalised dB)
+- **ADC PSD (SNDR, SFDR, harmonics)…**: ADC characterisation
+- **SNR / SNDR / ENOB…**: numeric metrics with the same backend
+- **Histogram**: distribution + Gaussian fit
+- **Differentiate (dy/dx)**: numerical derivative
+- **Linear fit…**, **Difference (this − other)…**, **X vs Y…**
+- **2's complement decode** submenu: 8 / 10 / 12 / 16-bit signed
+- **Math expressions**: create derived signals
+- **Digital analysis**: bus values and timing
+- **Export data**: save currently visible waveforms
+
+#### ADC PSD dialog
+
+Tailored for ADC bench data and behavioural simulations, inspired by
+`oct_dofft.m` / `dofftsd.m`:
+
+| Field | Meaning |
+|-------|---------|
+| `Sample rate F_s` | Empty → infer from the time axis |
+| `Fundamental F₀` | Empty / 0 → auto (strongest non-DC bin, with DC and Nyquist guard bands) |
+| `Oversampling OSR` | `>1` integrates noise only over the in-band slice (`1 … N_fft / OSR`), σΔ-style |
+| `Max harmonic order` | Default 5 (H2…H5 typical for ADC reports) |
+| `Harmonic lobe ±bins` | Half-width for the harmonic masks. Hann main lobe is 3 bins; ±3 (7 bins) is a safe default for non-coherent captures |
+| `Fundamental lobe ±bins` | Separate width for the fundamental — use a wider window when jitter or drift smears the tone more than the harmonics |
+| `Full-scale amplitude A_FS` | Peak FS sine amplitude (same units as `y`). Empty → spectrum is **dBc**; set → **dBFS** plot + `Signal level = … dBFS` line |
+| `Exclude harmonics from SNR…` | Splits SNR vs SNDR (default on); off matches σΔ "in-band noise only" |
+| `Logarithmic frequency axis` | Default on; dialog and markers stay aligned in either mode |
+
+**Reported metrics** (per call, also shown as a banner on the main wave tab):
+
+- `SNR`, `SNDR`, `ENOB` (`dynamic_parameters` backend)
+- `SFDR` — IEEE definition: ratio of fundamental lobe to the **largest
+  spur, harmonics included** (always in dBc)
+- `Hn` table — for each harmonic up to *Max*: integrated `lobe power`
+  (dBc) and `peak` bin (dBc)
+- Fundamental + harmonics drawn as vertical markers, with diamond
+  glyphs at the spectrum peak nearest each tone
+
+All dialog fields are **persisted between invocations** via QSettings
+(`cicwave/cicwave/{snr_dialog,adc_psd_dialog}/…`), so running ADC PSD on
+the next signal reuses the same `F_s`, `A_FS`, lobe widths and so on.
 
 ### Session Management
 - **File → Save Session**: Save current plot configuration

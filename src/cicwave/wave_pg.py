@@ -17,8 +17,9 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QSplitter, QTreeWidget, QTreeWidgetItem, QLineEdit, QTabWidget,
     QPushButton, QLabel, QCheckBox, QTextEdit, QFileDialog, QDialog,
-    QInputDialog, QMenu, QComboBox, QTableWidget, QTableWidgetItem,
-    QHeaderView, QAbstractItemView, QMessageBox)
+    QDialogButtonBox, QFormLayout, QInputDialog, QMenu, QComboBox,
+    QTableWidget, QTableWidgetItem,
+    QHeaderView, QAbstractItemView, QMessageBox, QSpinBox)
 from PySide6 import QtCore
 from PySide6.QtCore import Qt, Signal, QEvent, QSettings, QTimer
 from PySide6.QtGui import (QKeySequence, QFont, QFontDatabase, QShortcut,
@@ -27,6 +28,7 @@ from PySide6.QtGui import (QKeySequence, QFont, QFontDatabase, QShortcut,
 import pyqtgraph as pg
 
 from .wavefiles import WaveFile, WaveFiles, parse_unit_from_name
+from . import analysis as wave_analysis
 from .theme import THEMES, _get_theme, _set_active_theme
 from matplotlib.ticker import EngFormatter
 
@@ -56,6 +58,41 @@ def _read_saved_default_xaxis():
 def _write_saved_default_xaxis(name):
     s = QSettings("cicwave", "cicwave")
     s.setValue("default_x_axis", name or "")
+
+
+def _settings_str(group, key, default=""):
+    """Read a string setting from the ``cicwave/<group>`` namespace."""
+    s = QSettings("cicwave", "cicwave")
+    s.beginGroup(group)
+    try:
+        v = s.value(key, default)
+    finally:
+        s.endGroup()
+    return str(v) if v is not None else default
+
+
+def _settings_save(group, mapping):
+    """Persist *mapping* (key → str / int / bool) under ``cicwave/<group>``."""
+    s = QSettings("cicwave", "cicwave")
+    s.beginGroup(group)
+    try:
+        for k, v in mapping.items():
+            s.setValue(k, v)
+    finally:
+        s.endGroup()
+
+
+def _settings_int(group, key, default):
+    raw = _settings_str(group, key, str(default))
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def _settings_bool(group, key, default):
+    raw = _settings_str(group, key, "1" if default else "0")
+    return raw not in ("0", "false", "False", "")
 
 
 def _apply_grid(plot_item):
@@ -250,6 +287,10 @@ class PgWave:
         self.color = None
         self._xlabels = None
         self._ylabels = None
+        #- Per-wave 2's complement width (bits); ``None`` = use raw *y*.
+        #- Do not combine with :class:`WaveFile` global twos decode on
+        #- the same column (would double-decode).
+        self.twos_width_bits = None
         self.reload()
 
     @staticmethod
@@ -336,6 +377,13 @@ class PgWave:
                     y = y * self._yscale
                 except TypeError:
                     pass  # non-numeric (digital) data; ignore scale
+            if self.twos_width_bits is not None:
+                try:
+                    y = wave_analysis.decode_twos_complement(
+                        np.asarray(y, dtype=np.float64),
+                        int(self.twos_width_bits))
+                except Exception:
+                    pass
             self.y = y
 
         self._maybe_apply_digital_kind()
@@ -1051,10 +1099,28 @@ class PgWaveBrowser(QWidget):
                     self.waveSelected.emit(w)
                 digital_menu.addAction(fmt_label, _set_fmt)
         menu.addSeparator()
-        for label, atype in [("FFT / PSD", "fft"),
-                             ("Histogram", "histogram"),
-                             ("Differentiate (dy/dx)", "differentiate"),
-                             ("X vs Y...", "xvy")]:
+        twos_menu = menu.addMenu("2's complement decode")
+        for bits in (8, 10, 12, 16):
+            def _set_twos(b=bits, w=wave):
+                w.twos_width_bits = b
+                w.reload()
+                self.waveSelected.emit(w)
+            twos_menu.addAction("%d-bit signed" % bits, _set_twos)
+        def _clear_twos(w=wave):
+            w.twos_width_bits = None
+            w.reload()
+            self.waveSelected.emit(w)
+        twos_menu.addAction("Clear (raw unsigned)", _clear_twos)
+        menu.addSeparator()
+        for label, atype in [
+                ("FFT / PSD", "fft"),
+                ("Histogram", "histogram"),
+                ("Differentiate (dy/dx)", "differentiate"),
+                ("Linear fit...", "linfit"),
+                ("Difference (this − other)...", "diff"),
+                ("SNR / SNDR / ENOB...", "snr"),
+                ("ADC PSD (SNDR, SFDR, harmonics)...", "adc_psd"),
+                ("X vs Y...", "xvy")]:
             menu.addAction(label, lambda t=atype: self.analysisRequested.emit(
                 t, wave))
         menu.exec(self.wave_tree.viewport().mapToGlobal(pos))
@@ -1131,6 +1197,9 @@ class PgWavePlot(QWidget):
         self.custom_xlabel = None
         self.custom_ylabel = None
         self.custom_title = None
+        #- Appended under per-wave stats in the readout (SNR dialog, pivot
+        #- export, etc.). Cleared when all waves are removed.
+        self._metrics_banner = ""
 
         # Wheel-zoom coalescing: rapid wheel ticks (touchpad / high-rate
         # mice) are accumulated into a single deferred range update so we
@@ -1737,6 +1806,7 @@ class PgWavePlot(QWidget):
         return None
 
     def removeAll(self):
+        self._metrics_banner = ""
         tags = list(self.wave_data.keys())
         for tag in tags:
             self._remove_wave(tag)
@@ -1979,13 +2049,17 @@ class PgWavePlot(QWidget):
                 arrowprops=dict(arrowstyle='->', color='#555555'))
 
         stats = self.getStats()
+        export_notes = []
         if stats:
-            stat_lines = []
             for s in stats:
                 u = s['unit']
-                stat_lines.append("%s: μ=%s σ=%s" % (
-                    s['key'], _eng(s['mean'], u), _eng(s['std'], u)))
-            fig.text(0.01, 0.01, "  |  ".join(stat_lines),
+                export_notes.append("%s: μ=%s σ=%s rms=%s" % (
+                    s['key'], _eng(s['mean'], u), _eng(s['std'], u),
+                    _eng(s['rms'], u)))
+        if getattr(self, '_metrics_banner', '').strip():
+            export_notes.append(self._metrics_banner.strip())
+        if export_notes:
+            fig.text(0.01, 0.01, "\n".join(export_notes),
                      fontsize=6, color=theme['export_stats_color'],
                      va='bottom')
 
@@ -2649,23 +2723,40 @@ class PgWavePlot(QWidget):
                 'min': float(np.min(y)), 'max': float(np.max(y)),
                 'mean': float(np.mean(y)), 'std': float(np.std(y)),
                 'pp': float(np.max(y) - np.min(y)),
+                'rms': wave_analysis.rms(y),
             })
         return stats
+
+    def set_metrics_banner(self, text):
+        """Persistent multi-line block under stats until cleared."""
+        self._metrics_banner = (text or "").strip()
+
+    def clear_metrics_banner(self):
+        self._metrics_banner = ""
+        self._update_readout()
 
     def _show_stats(self):
         stats = self.getStats()
         if not stats:
             self.readout.clear()
+            if self._metrics_banner:
+                self.readout.setPlainText(
+                    "--- Dynamic metrics ---\n" + self._metrics_banner)
             return
         lines = []
         for s in stats:
             u = s['unit']
             lines.append(
-                "  %-22s  min: %-12s  max: %-12s  μ: %-12s  σ: %-12s  pp: %-12s  %s"
+                "  %-22s  min: %-12s  max: %-12s  μ: %-12s  σ: %-12s  "
+                "rms: %-10s  pp: %-10s  %s"
                 % (s['key'], _eng(s['min'], u), _eng(s['max'], u),
-                   _eng(s['mean'], u), _eng(s['std'], u), _eng(s['pp'], u),
+                   _eng(s['mean'], u), _eng(s['std'], u),
+                   _eng(s['rms'], u), _eng(s['pp'], u),
                    s.get('file', '')))
-        self.readout.setPlainText("\n".join(lines))
+        body = "\n".join(lines)
+        if self._metrics_banner:
+            body += "\n\n--- Dynamic metrics ---\n" + self._metrics_banner
+        self.readout.setPlainText(body)
 
     def addAnnotation(self, x, y, text):
         theme = _get_theme()
@@ -2749,7 +2840,10 @@ class PgWavePlot(QWidget):
                     wparts.append("dB: %-14s" % _eng(gb, du))
             lines.append("%s  %s" % ("".join(wparts), wave.wfile.name))
 
-        self.readout.setPlainText("\n".join(lines))
+        body = "\n".join(lines)
+        if self._metrics_banner:
+            body += "\n\n--- Dynamic metrics ---\n" + self._metrics_banner
+        self.readout.setPlainText(body)
 
 
 class PgAnalysisPlot(QWidget):
@@ -2791,6 +2885,16 @@ class PgAnalysisPlot(QWidget):
         self._logx = False
         self._xunit = ""
         self._yunit = ""
+
+        #- Match :class:`PgWavePlot` scroll zoom: coalesced wheel bursts;
+        #- plain wheel = x, Shift+wheel = y.
+        self._wheel_pending_x_scale = 1.0
+        self._wheel_pending_y_scale = 1.0
+        self._wheel_pending_pos = None
+        self._wheel_timer = QTimer(self)
+        self._wheel_timer.setSingleShot(True)
+        self._wheel_timer.setInterval(16)
+        self._wheel_timer.timeout.connect(self._apply_pending_wheel_zoom)
 
         self.pw.scene().sigMouseMoved.connect(self._on_mouse_moved)
 
@@ -2900,48 +3004,121 @@ class PgAnalysisPlot(QWidget):
         if delta == 0:
             return
         scale = 1.0 / ZOOM_FACTOR if delta > 0 else ZOOM_FACTOR
-        vb = self.pw.plotItem.vb
-        pos = event.pos()
-        mouse_point = vb.mapSceneToView(pos)
         modifiers = event.modifiers()
+
+        if not self._wheel_timer.isActive():
+            self._wheel_pending_pos = event.pos()
+            self._wheel_pending_x_scale = 1.0
+            self._wheel_pending_y_scale = 1.0
+
         if modifiers & Qt.ShiftModifier:
+            self._wheel_pending_y_scale *= scale
+        else:
+            self._wheel_pending_x_scale *= scale
+
+        self._wheel_timer.start()
+        event.accept()
+
+    def _apply_pending_wheel_zoom(self):
+        pos = self._wheel_pending_pos
+        if pos is None:
+            return
+        sx = self._wheel_pending_x_scale
+        sy = self._wheel_pending_y_scale
+        self._wheel_pending_x_scale = 1.0
+        self._wheel_pending_y_scale = 1.0
+
+        vb = self.pw.plotItem.vb
+
+        if sy != 1.0:
             vr = vb.viewRange()
             ylo, yhi = vr[1]
-            yd = mouse_point.y()
-            vb.setYRange(yd - (yd - ylo) * scale,
-                         yd + (yhi - yd) * scale, padding=0)
-        else:
+            pt = vb.mapSceneToView(pos)
+            ydata = pt.y()
+            vb.setYRange(
+                ydata - (ydata - ylo) * sy,
+                ydata + (yhi - ydata) * sy, padding=0)
+
+        if sx != 1.0:
+            mouse_point = vb.mapSceneToView(pos)
             vr = vb.viewRange()
             xlo, xhi = vr[0]
-            xd = mouse_point.x()
-            vb.setXRange(xd - (xd - xlo) * scale,
-                         xd + (xhi - xd) * scale, padding=0)
-        event.accept()
+            xdata = mouse_point.x()
+            vb.setXRange(
+                xdata - (xdata - xlo) * sx,
+                xdata + (xhi - xdata) * sx, padding=0)
 
     def _on_mouse_drag(self, ev, axis=None):
         mods = ev.modifiers()
-        if ev.button() == Qt.RightButton and (
-                mods & Qt.ShiftModifier or mods & Qt.ControlModifier):
-            ev.accept()
-            if ev.isFinish():
-                return
-            delta = ev.pos() - ev.lastPos()
-            vb = self.pw.plotItem.vb
-            vr = vb.viewRange()
-            w = vb.width()
-            h = vb.height()
+        if ev.button() == Qt.RightButton:
+            ctrl_like = (Qt.ControlModifier | Qt.MetaModifier)
             if mods & Qt.ShiftModifier:
-                dx = delta.x() / w
-                xlo, xhi = vr[0]
-                xspan = xhi - xlo
-                vb.setXRange(xlo + dx * xspan, xhi - dx * xspan, padding=0)
-            elif mods & Qt.ControlModifier:
-                dy = delta.y() / h
-                ylo, yhi = vr[1]
-                yspan = yhi - ylo
-                vb.setYRange(ylo - dy * yspan, yhi + dy * yspan, padding=0)
+                self._right_drag_rubber_band(ev, constrain='x')
+            elif mods & ctrl_like:
+                self._right_drag_rubber_band(ev, constrain='y')
+            else:
+                self._right_drag_rubber_band(ev, constrain=None)
         else:
             self._orig_drag(ev, axis)
+
+    def _right_drag_rubber_band(self, ev, constrain=None):
+        """Same rubber-band zoom as :class:`PgWavePlot` (RectMode-style)."""
+        ev.accept()
+        vb = self.pw.plotItem.vb
+        from PySide6.QtCore import QRectF, QPointF
+        from pyqtgraph import Point
+
+        down_pos = ev.buttonDownPos(Qt.RightButton)
+        cur_pos = ev.pos()
+
+        vb_rect = vb.rect()
+        if constrain == 'x':
+            top = vb_rect.top()
+            bot = vb_rect.bottom()
+            screen_rect = QRectF(QPointF(down_pos.x(), top),
+                                 QPointF(cur_pos.x(), bot))
+        elif constrain == 'y':
+            left = vb_rect.left()
+            right = vb_rect.right()
+            screen_rect = QRectF(QPointF(left, down_pos.y()),
+                                 QPointF(right, cur_pos.y()))
+        else:
+            screen_rect = QRectF(Point(down_pos), Point(cur_pos))
+
+        if ev.isFinish():
+            try:
+                vb.rbScaleBox.hide()
+            except Exception:
+                pass
+            min_extent = 3
+            if constrain == 'x':
+                if abs(screen_rect.width()) < min_extent:
+                    return
+            elif constrain == 'y':
+                if abs(screen_rect.height()) < min_extent:
+                    return
+            else:
+                if (abs(screen_rect.width()) < min_extent or
+                        abs(screen_rect.height()) < min_extent):
+                    return
+
+            data_rect = vb.childGroup.mapRectFromParent(screen_rect)
+
+            if constrain == 'x':
+                vb.setXRange(data_rect.left(), data_rect.right(), padding=0)
+            elif constrain == 'y':
+                vb.setYRange(data_rect.top(), data_rect.bottom(), padding=0)
+            else:
+                vb.showAxRect(data_rect)
+                try:
+                    vb.axHistoryPointer += 1
+                    vb.axHistory = (vb.axHistory[:vb.axHistoryPointer]
+                                    + [data_rect])
+                except Exception:
+                    pass
+        else:
+            vb.updateScaleBox(screen_rect.topLeft(),
+                              screen_rect.bottomRight())
 
     def _on_mouse_moved(self, pos):
         vb = self.pw.plotItem.vb
@@ -3014,6 +3191,8 @@ class PgWaveWindow(QMainWindow):
         self._line_width = 2
         self._font_size = 9
         self.plot_index = 0
+        #- Filled by CLI before :meth:`autoplot_pivot_for_export`.
+        self._pending_export_metrics = ""
         self._add_plot_tab()
 
         self.browser.waveSelected.connect(self._on_wave_selected)
@@ -3456,6 +3635,7 @@ class PgWaveWindow(QMainWindow):
             "\n"
             "Analysis (right-click menu)\n"
             "  FFT / PSD          Spectral density\n"
+            "  ADC PSD            SNDR/SFDR + harmonic markers\n"
             "  Histogram          Distribution + fit\n"
             "  Differentiate      Numerical dy/dx\n"
             "  X vs Y             Parametric plot\n"
@@ -3733,13 +3913,37 @@ class PgWaveWindow(QMainWindow):
         y, _ = _to_numeric(wave.y)
 
         if atype == "fft":
-            self._do_fft(wave.key, x, y, wave.xunit, wave.yunit)
+            self._do_fft(wave.key, x, y, wave.xunit, wave.yunit,
+                          dbfs_amplitude=None)
         elif atype == "histogram":
             self._do_histogram(wave.key, y, wave.yunit)
         elif atype == "differentiate":
             self._do_differentiate(wave.key, x, y, wave.xunit, wave.yunit)
+        elif atype == "linfit":
+            self._do_linear_fit(wave.key, x, y, wave.xunit, wave.yunit)
+        elif atype == "diff":
+            self._do_diff_dialog(wave)
+        elif atype == "snr":
+            self._do_snr_dialog(wave, x, y)
+        elif atype == "adc_psd":
+            self._do_adc_psd_dialog(wave, x, y)
         elif atype == "xvy":
             self._do_xvy_dialog(wave)
+
+    def _plot_for_metrics(self):
+        """Return the main ``PgWavePlot`` to attach readout metrics to."""
+        w = self.tab_widget.currentWidget()
+        if isinstance(w, PgWavePlot):
+            return w
+        for i in range(self.tab_widget.count()):
+            ww = self.tab_widget.widget(i)
+            if isinstance(ww, PgWavePlot) and ww.wave_data:
+                return ww
+        for i in range(self.tab_widget.count()):
+            ww = self.tab_widget.widget(i)
+            if isinstance(ww, PgWavePlot):
+                return ww
+        return None
 
     def _add_analysis_tab(self, title):
         w = PgAnalysisPlot()
@@ -3748,33 +3952,338 @@ class PgWaveWindow(QMainWindow):
         self.tab_widget.setCurrentWidget(w)
         return w
 
-    def _do_fft(self, name, x, y, xunit, yunit):
+    def _do_fft(self, name, x, y, xunit, yunit, dbfs_amplitude=None):
         n = len(y)
         if n < 2:
             return
-
-        dt = np.mean(np.diff(x))
-        if dt <= 0:
+        try:
+            res = wave_analysis.psd_rfft(
+                x, y, auto_resample=True, dbfs_amplitude=dbfs_amplitude)
+        except Exception:
             return
-
-        window = np.hanning(n)
-        yw = y * window
-        Y = np.fft.rfft(yw)
-        freqs = np.fft.rfftfreq(n, d=dt)
-
-        psd = np.abs(Y) ** 2
-        psd[psd < 1e-300] = 1e-300
-        psd_db = 10.0 * np.log10(psd / np.max(psd))
-
-        freqs = freqs[1:]
-        psd_db = psd_db[1:]
-
-        w = self._add_analysis_tab("FFT: %s" % name)
+        freqs = res.freq_hz
+        psd_db = res.psd_db
+        title = "FFT: %s" % name
+        if res.meta.get("resampled"):
+            title += " (resampled)"
+        if res.meta.get("dbfs"):
+            title += " [dBFS]"
+        w = self._add_analysis_tab(title)
         w.plot(freqs, psd_db, pen=pg.mkPen('c', width=2))
         w.setLabel('bottom', 'Frequency', units='Hz')
-        w.setLabel('left', 'PSD', units='dB')
+        ylab = 'PSD (dBFS)' if res.meta.get('dbfs') else 'PSD (dBc)'
+        w.setLabel('left', ylab, units='dB')
         if len(freqs) > 1 and freqs[0] > 0:
             w.setLogMode(x=True, y=False)
+
+    def _do_snr_dialog(self, wave, x, y):
+        grp = "snr_dialog"
+        dlg = QDialog(self)
+        dlg.setWindowTitle("SNR / SNDR / ENOB — %s" % wave.key)
+        form = QFormLayout(dlg)
+        e_fs = QLineEdit(_settings_str(grp, "fs"))
+        e_fs.setPlaceholderText("e.g. 1e6")
+        e_f0 = QLineEdit(_settings_str(grp, "f0"))
+        e_f0.setPlaceholderText("Hz, or empty / 0 = auto (peak bin)")
+        e_osr = QLineEdit(_settings_str(grp, "osr", "1"))
+        e_osr.setPlaceholderText("1 = full Nyquist noise band")
+        e_fmin = QLineEdit(_settings_str(grp, "fmin"))
+        e_fmin.setPlaceholderText("-1 = full band low")
+        e_fmax = QLineEdit(_settings_str(grp, "fmax"))
+        e_fmax.setPlaceholderText("-1 = full band high")
+        cb_dc = QCheckBox("Remove DC")
+        cb_dc.setChecked(_settings_bool(grp, "remove_dc", True))
+        cb_harm = QCheckBox("Exclude harmonics from noise (SNR vs SNDR)")
+        cb_harm.setChecked(_settings_bool(grp, "exclude_harmonics", True))
+        form.addRow("Sampling rate F_s (Hz)", e_fs)
+        form.addRow("Fundamental F₀ (Hz)", e_f0)
+        form.addRow("Oversampling OSR (dofftsd in-band)", e_osr)
+        form.addRow("Noise band F_min (Hz)", e_fmin)
+        form.addRow("Noise band F_max (Hz)", e_fmax)
+        form.addRow(cb_dc)
+        form.addRow(cb_harm)
+        bb = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        form.addRow(bb)
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        try:
+            fs = float(e_fs.text().strip())
+            f0_s = e_f0.text().strip()
+            if not f0_s:
+                f0_opt = None
+            else:
+                f0v = float(f0_s)
+                f0_opt = None if f0v <= 0 or not np.isfinite(f0v) else f0v
+            osr = float(e_osr.text().strip() or "1")
+            fmin = float(e_fmin.text().strip() or "-1")
+            fmax = float(e_fmax.text().strip() or "-1")
+        except ValueError:
+            QMessageBox.warning(self, "SNR", "Invalid numeric input.")
+            return
+        _settings_save(grp, {
+            "fs": e_fs.text().strip(),
+            "f0": e_f0.text().strip(),
+            "osr": e_osr.text().strip(),
+            "fmin": e_fmin.text().strip(),
+            "fmax": e_fmax.text().strip(),
+            "remove_dc": "1" if cb_dc.isChecked() else "0",
+            "exclude_harmonics": "1" if cb_harm.isChecked() else "0",
+        })
+        res = wave_analysis.dynamic_parameters(
+            y, fs, f0_opt, fmin=fmin, fmax=fmax,
+            remove_dc=cb_dc.isChecked(), osr=osr,
+            exclude_harmonics=cb_harm.isChecked())
+        f0_line = (
+            "F₀ (used) = %.6g Hz  (bin %d)\n"
+            % (res.f0_hz, res.signal_bin)
+            if np.isfinite(res.f0_hz) and res.signal_bin >= 0
+            else "")
+        txt = (
+            "%s\n%sSNR  = %.2f dB\nSNDR = %.2f dB\nENOB = %.2f bits"
+            % (wave.key, f0_line, res.snr_db, res.sndr_db, res.enob))
+        p = self._plot_for_metrics()
+        if p:
+            p.set_metrics_banner(txt)
+            p._update_readout()
+            #- User may be on an FFT / analysis tab; the readout lives on
+            #- ``PgWavePlot``, so switch to the tab that was updated.
+            self.tab_widget.setCurrentWidget(p)
+        else:
+            QMessageBox.information(
+                self, "SNR / SNDR / ENOB", txt)
+
+    def _do_adc_psd_dialog(self, wave, x, y):
+        grp = "adc_psd_dialog"
+        dlg = QDialog(self)
+        dlg.setWindowTitle("ADC PSD — %s" % wave.key)
+        form = QFormLayout(dlg)
+        e_fs = QLineEdit(_settings_str(grp, "fs"))
+        e_fs.setPlaceholderText("empty = infer from time axis")
+        e_f0 = QLineEdit(_settings_str(grp, "f0"))
+        e_f0.setPlaceholderText("empty / 0 = auto (strongest bin)")
+        e_osr = QLineEdit(_settings_str(grp, "osr", "1"))
+        e_osr.setPlaceholderText("1 = full Nyquist")
+        sp_hmax = QSpinBox()
+        sp_hmax.setRange(2, 64)
+        sp_hmax.setValue(_settings_int(grp, "max_harmonics", 5))
+        sp_lobe = QSpinBox()
+        sp_lobe.setRange(1, 64)
+        sp_lobe.setValue(_settings_int(grp, "filterwidth", 3))
+        sp_lobe.setToolTip(
+            "Default half-width of the harmonic lobes (FFT bins).\n"
+            "Hann main lobe is 3 bins (±1) for a coherent capture; for\n"
+            "real-world non-coherent ADC data, ±3 (7 bins) is a safe default.")
+        sp_fundlobe = QSpinBox()
+        sp_fundlobe.setRange(0, 256)
+        sp_fundlobe.setValue(_settings_int(grp, "fund_filterwidth", 0))
+        sp_fundlobe.setSpecialValueText("(use harmonic width)")
+        sp_fundlobe.setToolTip(
+            "Half-width specifically for the **fundamental** lobe.\n"
+            "Use a wider window than the harmonic one when the fundamental\n"
+            "smears more than the harmonics (jitter, drift, leakage).")
+        e_afs = QLineEdit(_settings_str(grp, "afs"))
+        e_afs.setPlaceholderText(
+            "empty = dBc plot; e.g. 128 = peak FS amplitude → dBFS")
+        cb_harm = QCheckBox("Exclude harmonics from SNR noise (SNDR split)")
+        cb_harm.setChecked(_settings_bool(grp, "exclude_harmonics", True))
+        cb_logx = QCheckBox("Logarithmic frequency axis")
+        cb_logx.setChecked(_settings_bool(grp, "logx", True))
+        form.addRow("Sample rate F_s (Hz)", e_fs)
+        form.addRow("Fundamental F₀ (Hz)", e_f0)
+        form.addRow("Oversampling OSR", e_osr)
+        form.addRow("Max harmonic order", sp_hmax)
+        form.addRow("Harmonic lobe ±bins", sp_lobe)
+        form.addRow("Fundamental lobe ±bins", sp_fundlobe)
+        form.addRow("Full-scale amplitude A_FS", e_afs)
+        form.addRow(cb_harm)
+        form.addRow(cb_logx)
+        bb = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        form.addRow(bb)
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        try:
+            fs_s = e_fs.text().strip()
+            fs_opt = float(fs_s) if fs_s else None
+            f0_s = e_f0.text().strip()
+            if not f0_s:
+                f0_opt = None
+            else:
+                f0v = float(f0_s)
+                f0_opt = None if f0v <= 0 or not np.isfinite(f0v) else f0v
+            osr = float(e_osr.text().strip() or "1")
+            afs_s = e_afs.text().strip()
+            if not afs_s:
+                afs_opt = None
+            else:
+                afsv = float(afs_s)
+                afs_opt = None if afsv <= 0 or not np.isfinite(afsv) else afsv
+            fund_w_raw = int(sp_fundlobe.value())
+            fund_w_opt = None if fund_w_raw == 0 else fund_w_raw
+        except ValueError:
+            QMessageBox.warning(self, "ADC PSD", "Invalid numeric input.")
+            return
+        _settings_save(grp, {
+            "fs": e_fs.text().strip(),
+            "f0": e_f0.text().strip(),
+            "osr": e_osr.text().strip(),
+            "afs": e_afs.text().strip(),
+            "max_harmonics": int(sp_hmax.value()),
+            "filterwidth": int(sp_lobe.value()),
+            "fund_filterwidth": fund_w_raw,
+            "exclude_harmonics": "1" if cb_harm.isChecked() else "0",
+            "logx": "1" if cb_logx.isChecked() else "0",
+        })
+        try:
+            r = wave_analysis.adc_psd_analysis(
+                x, y, fs=fs_opt, f0=f0_opt, osr=osr,
+                exclude_harmonics=cb_harm.isChecked(),
+                max_harmonics=int(sp_hmax.value()),
+                filterwidth=int(sp_lobe.value()),
+                fund_filterwidth=fund_w_opt,
+                dbfs_amplitude=afs_opt)
+        except Exception as ex:
+            QMessageBox.warning(self, "ADC PSD", str(ex))
+            return
+
+        title = "ADC PSD: %s" % wave.key
+        w = self._add_analysis_tab(title)
+
+        #- Choose log x only when usable (first bin > 0) and requested.
+        use_logx = (cb_logx.isChecked()
+                    and len(r.freq_hz) > 1 and r.freq_hz[0] > 0)
+
+        #- pyqtgraph applies log10 to PlotDataItem internally when
+        #- setLogMode(x=True), but **not** to InfiniteLine / ScatterPlotItem.
+        #- So in log mode we have to feed those items log10(freq) ourselves
+        #- to keep the harmonic markers aligned with the spectrum curve.
+        def _fx(f):
+            return float(np.log10(f)) if use_logx else float(f)
+
+        w.plot(r.freq_hz, r.psd_db, pen=pg.mkPen('c', width=2))
+
+        for i, ff in enumerate(r.marker_freqs_hz):
+            if ff <= 0 and use_logx:
+                continue
+            if i == 0:
+                pen = pg.mkPen('#e8c547', width=2)
+            else:
+                pen = pg.mkPen(
+                    '#ff6b6b' if (i % 2) else '#ffa94d',
+                    width=1, style=Qt.DashLine)
+            ln = pg.InfiniteLine(pos=_fx(ff), angle=90, pen=pen,
+                                 movable=False)
+            w.pw.addItem(ln)
+
+        #- Diamonds at spectrum peak nearest each harmonic (not via ``plot``
+        #- so :class:`PgAnalysisPlot` cursor readout stays tied to the PSD curve).
+        idx0 = int(np.argmin(np.abs(r.freq_hz - r.fundamental_hz)))
+        w.pw.addItem(pg.ScatterPlotItem(
+            [_fx(r.freq_hz[idx0])], [r.psd_db[idx0]],
+            size=12, symbol='d', pen=pg.mkPen('w', width=1),
+            brush=pg.mkBrush('#e8c547')))
+        for hl in r.harmonics:
+            f_t = hl.order * r.fundamental_hz
+            idx = int(np.argmin(np.abs(r.freq_hz - f_t)))
+            fx_h = r.freq_hz[idx]
+            if fx_h <= 0 and use_logx:
+                continue
+            w.pw.addItem(pg.ScatterPlotItem(
+                [_fx(fx_h)], [r.psd_db[idx]],
+                size=9, symbol='d', pen=pg.mkPen('w', width=1),
+                brush=pg.mkBrush('#ff6b6b')))
+
+        w.setLabel('bottom', 'Frequency', units='Hz')
+        w.setLabel('left', 'PSD', units=r.psd_unit)
+        w.setLogMode(x=use_logx, y=False)
+
+        lines = [
+            "%s  (N=%d, F_s=%.6g Hz)" % (wave.key, r.n_fft, r.fs),
+            "F₀ = %.6g Hz  (bin %d)" % (r.fundamental_hz, r.signal_bin),
+        ]
+        if np.isfinite(r.signal_dbfs):
+            lines.append(
+                "Signal level = %.2f dBFS  (A_FS = %s)"
+                % (r.signal_dbfs, e_afs.text().strip()))
+        lines.extend([
+            "SNR  = %.2f dB   SNDR = %.2f dB   ENOB = %.2f bits" % (
+                r.dynamic.snr_db, r.dynamic.sndr_db, r.dynamic.enob),
+            (("SFDR = %.2f dBc  (worst spur, harmonics included)"
+              % r.sfdr_db)
+             if np.isfinite(r.sfdr_db) else "SFDR = —"),
+            "",
+            "Harmonics (lobe power / peak vs fund):",
+        ])
+        for hl in r.harmonics:
+            lines.append(
+                "  H%d:  %.2f dBc   peak %.2f dBc"
+                % (hl.order, hl.power_dbc, hl.peak_dbc))
+        if not r.harmonics:
+            lines.append("  (none within Nyquist)")
+        w.readout.setPlainText("\n".join(lines))
+
+        #- Banner: identity + signal level (if any) + SNR/SNDR/ENOB + SFDR.
+        banner_count = 4 if not np.isfinite(r.signal_dbfs) else 5
+        banner = "\n".join(lines[:banner_count])
+        p = self._plot_for_metrics()
+        if p:
+            p.set_metrics_banner(banner)
+            p._update_readout()
+            self.tab_widget.setCurrentWidget(w)
+
+    def _do_linear_fit(self, name, x, y, xunit, yunit):
+        fit = wave_analysis.linear_fit(x, y)
+        if not np.isfinite(fit.slope):
+            return
+        w = self._add_analysis_tab("Linear fit: %s" % name)
+        w.plot(x, y, pen=None, symbol='o', symbolSize=5,
+               symbolBrush='c')
+        xf = np.linspace(float(np.min(x)), float(np.max(x)), max(50, len(x)))
+        w.plot(xf, fit.intercept + fit.slope * xf,
+               pen=pg.mkPen('r', width=2))
+        w.setLabel('bottom', xunit if xunit else 'x')
+        w.setLabel('left', yunit if yunit else name)
+        note = ("slope=%.6g\nintercept=%.6g\nR=%.5f  R²=%.5f" % (
+            fit.slope, fit.intercept, fit.r, fit.r_squared))
+        ti = pg.TextItem(note, color=_get_theme()['text_color'], anchor=(0, 1))
+        w.addItem(ti, ignoreBounds=True)
+
+    def _do_diff_dialog(self, wave_a):
+        f = self.browser.files.getSelected()
+        if not f:
+            return
+        names = list(f.getWaveNames())
+        dlg = _SignalPickerDialog(self, "Subtract this column from %s" % (
+            wave_a.key,), names, file_label=f.name)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        chosen = dlg.selected()
+        if not chosen or chosen == wave_a.key:
+            return
+        wb = PgWave(f, chosen, self.browser.xaxis)
+        wb.reload()
+        ya, _ = _to_numeric(wave_a.y)
+        yb, _ = _to_numeric(wb.y)
+        n = min(len(ya), len(yb))
+        if n < 1:
+            return
+        ya = ya[:n]
+        yb = yb[:n]
+        diff = wave_analysis.difference(ya, yb)
+        xa, _ = _to_numeric(wave_a.x)
+        if len(xa) >= n:
+            xx = xa[:n]
+        else:
+            xx = np.arange(n, dtype=float)
+        w = self._add_analysis_tab("%s − %s" % (wave_a.key, chosen))
+        w.plot(xx, diff, pen=pg.mkPen('g', width=2))
+        w.setLabel('bottom', wave_a.xlabel or 'x')
+        w.setLabel('left', "Δ (%s)" % wave_a.key)
 
     def _do_histogram(self, name, y, yunit):
         n = len(y)
@@ -3861,6 +4370,37 @@ class PgWaveWindow(QMainWindow):
         if ylabels:
             ticks = list(zip(yy[:min_len], ylabels[:min_len]))
             w.pw.getAxis('left').setTicks([ticks])
+
+    def autoplot_pivot_for_export(self):
+        """Plot every Y column from the current file so ``--export`` has data."""
+        f = self.browser.files.getSelected()
+        if f is None:
+            return
+        names = list(f.getWaveNames())
+        xn = self.browser.xaxis
+        if xn and xn in names:
+            ynames = [n for n in names if n != xn]
+        else:
+            ynames = names[1:] if len(names) > 1 else names
+        if not ynames:
+            return
+        p = self.tab_widget.currentWidget()
+        if not isinstance(p, PgWavePlot):
+            self._add_plot_tab()
+            p = self.tab_widget.currentWidget()
+        style = self.browser.plotStyle
+        for yname in ynames:
+            tag = f.getTag(yname)
+            if tag not in self.browser._wave_cache:
+                self.browser._wave_cache[tag] = PgWave(
+                    f, yname, self.browser.xaxis)
+            wave = self.browser._wave_cache[tag]
+            wave.reload()
+            p.show_wave(wave, style=style)
+        banner = getattr(self, '_pending_export_metrics', '') or ''
+        if banner.strip() and isinstance(p, PgWavePlot):
+            p.set_metrics_banner(banner.strip())
+            p._update_readout()
 
     def openFile(self, fname, sheet_name=None):
         self.browser.openFile(fname, sheet_name=sheet_name)

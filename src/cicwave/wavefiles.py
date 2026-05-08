@@ -26,6 +26,8 @@
 ######################################################################
 
 
+import csv as _csv_mod
+import io as _io
 import os
 import re
 import numpy as np
@@ -33,6 +35,56 @@ import pandas as pd
 from matplotlib.ticker import EngFormatter
 
 from .ngraw import toDataFrame as _ngraw_toDataFrame
+
+
+#- Sentinel used by ``WaveFile.csv_comment_override`` to distinguish
+#- "user has not configured anything" (use per-format default) from
+#- "user explicitly disabled comment stripping" (override = None).
+_UNSET = object()
+
+
+def _normalize_csv_comment(s):
+    """Normalize a user-supplied comment-line marker.
+
+    Empty string ``""`` is the explicit "disable" sentinel and returns
+    ``None`` (no comment stripping). Any other non-blank string is
+    accepted as-is (single character is fast-path through pandas;
+    multi-character is handled via a pre-filter at read time).
+    Whitespace-only input is rejected so the CLI surfaces a clear error.
+    """
+    if s is None:
+        return None
+    if not isinstance(s, str):
+        raise ValueError("comment marker must be a string")
+    if s == "":
+        return None
+    if not s.strip():
+        raise ValueError(
+            "comment marker must contain non-whitespace characters; "
+            "got %r" % s)
+    return s
+
+
+def _normalize_csv_sep(sep):
+    """Normalize a user-supplied CSV separator string.
+
+    Accepts a single character, the literal escape ``\\t``, or the aliases
+    ``tab`` / ``TAB``. Returns the resolved single-character separator.
+    Raises :class:`ValueError` on anything else so the CLI can surface a
+    clear error message rather than silently falling back to comma.
+    """
+    if sep is None:
+        return None
+    if not isinstance(sep, str) or sep == "":
+        raise ValueError("CSV separator must be a non-empty string")
+    low = sep.lower()
+    if low in ("tab", "\\t"):
+        return "\t"
+    if len(sep) == 1:
+        return sep
+    raise ValueError(
+        "CSV separator must be a single character "
+        "(or 'tab' / '\\t'); got %r" % sep)
 
 # ---------------------------------------------------------------------------
 # Unit auto-detection from column names.
@@ -262,7 +314,12 @@ class WaveFile():
         '.csv', '.tsv', '.txt',
         '.xlsx', '.xls', '.ods',
         '.parquet', '.feather',
+        '.dat', '.spe', '.cou', '.chi',
     }
+
+    #- Extensions that map to the whitespace-separated reader. Kept as a
+    #- class attribute so tests / external callers can introspect.
+    _WHITESPACE_EXTS = ('.dat', '.spe', '.cou', '.chi')
 
     def __init__(self, fname, xaxis, sheet_name=0, df=None):
         self.xaxis = xaxis
@@ -276,7 +333,11 @@ class WaveFile():
         self._columns = None
         self._virtual = df is not None
         if self._virtual and df is not None:
-            self._columns = list(df.columns)
+            #- In-memory frames (pivot / session) skip global ``--twos-complement``
+            #- so we do not re-decode already-processed floats. Use pivot
+            #- ``analysis.preprocess`` or per-wave GUI decode instead.
+            self._df = df.copy()
+            self._columns = list(self._df.columns)
         self.modified = None
         self.reload()
 
@@ -337,9 +398,11 @@ class WaveFile():
 
     def _read_header(self, ext):
         if ext in ('.csv',):
-            return self._read_csv_header(',')
+            return self._read_csv_header(self._sniff_csv_sep(default=','))
         if ext in ('.tsv', '.txt'):
             return self._read_csv_header('\t')
+        if ext in self._WHITESPACE_EXTS:
+            return self._read_whitespace_header()
         if ext in ('.xlsx', '.xls', '.ods'):
             df = pd.read_excel(self.fname, sheet_name=self.sheet_name, nrows=0)
             return [c.strip() for c in df.columns]
@@ -352,24 +415,35 @@ class WaveFile():
         raise ValueError("no header reader for %s" % ext)
 
     def _read_csv_header(self, sep):
+        comment = self._effective_comment(default=None)
+        if comment and len(comment) > 1:
+            #- Multi-char comment: pre-filter and parse from memory.
+            buf = self._prefilter_text(comment)
+            df = pd.read_csv(buf, sep=sep, nrows=0)
+            return [c.strip() for c in df.columns]
+        c_kw = {'comment': comment} if comment else {}
         try:
             df = pd.read_csv(self.fname, sep=sep, nrows=0,
-                             engine='c', memory_map=True)
+                             engine='c', memory_map=True, **c_kw)
         except Exception:
             try:
-                df = pd.read_csv(self.fname, sep=sep, nrows=0)
+                df = pd.read_csv(self.fname, sep=sep, nrows=0, **c_kw)
             except Exception:
                 df = pd.read_csv(self.fname, sep=None, engine='python',
-                                 nrows=0)
+                                 nrows=0, **c_kw)
         return [c.strip() for c in df.columns]
 
     PANDAS_READERS = {
         '.prn':     lambda self: self._read_prn(),
         '.vcd':     lambda self: read_vcd(self.fname),
         '.iqvsa':   lambda self: read_iqvsa(self.fname),
-        '.csv':     lambda self: self._read_csv(','),
+        '.csv':     lambda self: self._read_csv(self._sniff_csv_sep(default=',')),
         '.tsv':     lambda self: self._read_csv('\t'),
         '.txt':     lambda self: self._read_csv('\t'),
+        '.dat':     lambda self: self._read_whitespace(),
+        '.spe':     lambda self: self._read_whitespace(),
+        '.cou':     lambda self: self._read_whitespace(),
+        '.chi':     lambda self: self._read_whitespace(),
         '.xlsx':    lambda self: self._read_excel(),
         '.xls':     lambda self: self._read_excel(),
         '.ods':     lambda self: self._read_excel(),
@@ -393,22 +467,227 @@ class WaveFile():
         ext = os.path.splitext(self.fname)[1].lower()
         reader = self.PANDAS_READERS.get(ext)
         if reader:
-            return reader(self)
-        return _ngraw_toDataFrame(self.fname)
+            df = reader(self)
+        else:
+            df = _ngraw_toDataFrame(self.fname)
+        return self._apply_twos_decode_df(df)
 
-    def _read_csv(self, sep):
+    # Candidate delimiters for CSV auto-detection. Order is the tie-break
+    # preference (',' wins over ';' when counts are equal).
+    _CSV_DELIMITERS = (',', ';', '\t', '|')
+
+    #- Class-level override set by the CLI's ``--csv-sep`` flag. When
+    #- non-None, ``_sniff_csv_sep`` returns this verbatim instead of
+    #- inspecting the file. Use ``set_csv_sep_override`` to set it so the
+    #- usual aliases (``tab``, ``\t``, ``\\t``) are normalized.
+    csv_sep_override = None
+
+    #- Class-level override set by the CLI's ``--csv-comment`` flag.
+    #- Sentinel ``_UNSET`` means "use per-format default"; ``None`` means
+    #- "explicitly disable comment stripping"; any string is the marker.
+    csv_comment_override = _UNSET
+
+    #- Optional global 2's complement decode after load (``--twos-complement``).
+    twos_width = None
+    twos_columns = None  # None = all columns except common time names
+
+    @classmethod
+    def set_twos_complement(cls, width_bits, columns=None):
+        """Decode unsigned integer columns as *width_bits* 2's complement.
+
+        Pass ``width_bits=None`` to disable. *columns* is an iterable of
+        names, or ``None`` to apply to every column except ``time`` /
+        ``Time [s]`` / ``frequency`` / ``temp-sweep`` / ``v(v-sweep)`` /
+        ``i(i-sweep)``.
+        """
+        if width_bits is None:
+            cls.twos_width = None
+            cls.twos_columns = None
+            return
+        cls.twos_width = int(width_bits)
+        cls.twos_columns = tuple(columns) if columns else None
+
+    @classmethod
+    def _twos_skip_columns(cls):
+        return frozenset((
+            "time", "Time [s]", "frequency", "temp-sweep",
+            "v(v-sweep)", "i(i-sweep)",
+        ))
+
+    def _apply_twos_decode_df(self, df):
+        if self.twos_width is None:
+            return df
+        from .analysis import decode_twos_complement
+        skip = self._twos_skip_columns()
+        cols = self.twos_columns
+        if cols is None:
+            cols = [c for c in df.columns if c not in skip]
+        for c in cols:
+            if c not in df.columns:
+                continue
+            try:
+                df[c] = decode_twos_complement(
+                    df[c].to_numpy(), self.twos_width)
+            except Exception:
+                pass
+        return df
+
+    @classmethod
+    def set_csv_sep_override(cls, sep):
+        """Set a global CSV delimiter override (used by ``--csv-sep``).
+
+        Pass ``None`` to clear. Accepts a single character or one of the
+        aliases ``tab`` / ``\\t``. Raises :class:`ValueError` on bad input.
+        """
+        if sep is None:
+            cls.csv_sep_override = None
+            return
+        cls.csv_sep_override = _normalize_csv_sep(sep)
+
+    @classmethod
+    def set_csv_comment_override(cls, marker):
+        """Set a global comment-marker override (used by ``--csv-comment``).
+
+        Pass the sentinel ``_UNSET`` (or call with ``marker=_UNSET``) to
+        clear and fall back to per-format defaults. Pass ``""`` to
+        explicitly disable comment stripping. Pass any non-blank string
+        to use as the marker. Raises :class:`ValueError` on bad input.
+        """
+        if marker is _UNSET:
+            cls.csv_comment_override = _UNSET
+            return
+        cls.csv_comment_override = _normalize_csv_comment(marker)
+
+    def _effective_comment(self, default=None):
+        """Resolve the comment marker for this file.
+
+        If a global override has been set via
+        :meth:`set_csv_comment_override`, it wins (including the explicit
+        ``None`` "disabled" value). Otherwise return ``default``, which
+        callers pick to match the file format (``'#'`` for whitespace
+        formats, ``None`` for plain CSV/TSV).
+        """
+        if self.csv_comment_override is _UNSET:
+            return default
+        return self.csv_comment_override
+
+    def _sniff_csv_sep(self, default=','):
+        """Resolve the CSV delimiter for ``self.fname``.
+
+        If a global override has been set via :meth:`set_csv_sep_override`
+        (typically from the ``--csv-sep`` CLI flag), it wins unconditionally.
+        Otherwise, sniff the first few KB of the file: try
+        :class:`csv.Sniffer` first, then fall back to counting candidate
+        delimiters on the first non-empty line. Returns ``default`` if
+        nothing plausible is found.
+        """
+        if self.csv_sep_override:
+            return self.csv_sep_override
+        try:
+            with open(self.fname, 'r', encoding='utf-8',
+                      errors='replace', newline='') as f:
+                sample = f.read(8192)
+        except OSError:
+            return default
+        if not sample:
+            return default
+
+        try:
+            dialect = _csv_mod.Sniffer().sniff(
+                sample, delimiters=''.join(self._CSV_DELIMITERS))
+            if dialect.delimiter in self._CSV_DELIMITERS:
+                return dialect.delimiter
+        except _csv_mod.Error:
+            pass
+
+        first = next((ln for ln in sample.splitlines() if ln.strip()), '')
+        counts = {d: first.count(d) for d in self._CSV_DELIMITERS}
+        best = max(counts, key=counts.get)
+        return best if counts[best] > 0 else default
+
+    def _read_csv(self, sep, default_comment=None):
+        # Resolve comment marker: CLI override, else per-format default.
+        comment = self._effective_comment(default=default_comment)
+
+        if comment and len(comment) > 1:
+            #- Multi-char comment (e.g. ``//``): pandas only supports
+            #- single-char ``comment=``, so pre-filter the file once and
+            #- feed an in-memory buffer. Skips the pyarrow fast path,
+            #- which is fine since multi-char comments are rare.
+            buf = self._prefilter_text(comment)
+            df = pd.read_csv(buf, sep=sep)
+            df.columns = [c.strip() for c in df.columns]
+            return df
+
         # Prefer pyarrow (much faster on large numeric CSVs); fall back to
         # the C engine with memory_map, then the slow Python engine.
-        try:
-            df = pd.read_csv(self.fname, sep=sep, engine='pyarrow')
-        except Exception:
+        # pyarrow doesn't support ``comment=``, so skip it when set.
+        c_kw = {'comment': comment} if comment else {}
+        if not comment:
             try:
-                df = pd.read_csv(self.fname, sep=sep, engine='c',
-                                 low_memory=False, memory_map=True)
+                df = pd.read_csv(self.fname, sep=sep, engine='pyarrow')
+                df.columns = [c.strip() for c in df.columns]
+                return df
             except Exception:
-                df = pd.read_csv(self.fname, sep=None, engine='python')
+                pass
+        try:
+            df = pd.read_csv(self.fname, sep=sep, engine='c',
+                             low_memory=False, memory_map=True, **c_kw)
+        except Exception:
+            df = pd.read_csv(self.fname, sep=None, engine='python', **c_kw)
         df.columns = [c.strip() for c in df.columns]
         return df
+
+    def _prefilter_text(self, comment):
+        """Read ``self.fname`` and drop lines starting with ``comment``.
+
+        Used for multi-character comment markers (e.g. ``//``) that
+        :func:`pandas.read_csv` cannot handle natively. Returns a
+        :class:`io.StringIO` ready to feed back into ``read_csv``.
+        Leading whitespace before the marker is preserved verbatim;
+        only lines whose first non-whitespace characters match the
+        marker are skipped (matches SDN.Report's behavior).
+        """
+        kept = []
+        with open(self.fname, 'r', encoding='utf-8',
+                  errors='replace', newline='') as f:
+            for line in f:
+                if line.lstrip().startswith(comment):
+                    continue
+                kept.append(line)
+        return _io.StringIO(''.join(kept))
+
+    def _read_whitespace(self):
+        """Read a whitespace-separated text file (Eldo .cou/.chi, .dat, .spe).
+
+        Uses ``sep=r'\\s+'`` with the Python engine (pyarrow/C don't
+        support regex separators). Default comment marker is ``'#'``,
+        which covers ngspice ``.dat`` print files and most SPICE-family
+        log dumps; override with ``--csv-comment`` if needed.
+        """
+        comment = self._effective_comment(default='#')
+        if comment and len(comment) > 1:
+            buf = self._prefilter_text(comment)
+            df = pd.read_csv(buf, sep=r'\s+', engine='python')
+        else:
+            c_kw = {'comment': comment} if comment else {}
+            df = pd.read_csv(self.fname, sep=r'\s+',
+                             engine='python', **c_kw)
+        df.columns = [str(c).strip() for c in df.columns]
+        return df
+
+    def _read_whitespace_header(self):
+        """Lazy-header counterpart to :meth:`_read_whitespace`."""
+        comment = self._effective_comment(default='#')
+        if comment and len(comment) > 1:
+            buf = self._prefilter_text(comment)
+            df = pd.read_csv(buf, sep=r'\s+',
+                             engine='python', nrows=0)
+        else:
+            c_kw = {'comment': comment} if comment else {}
+            df = pd.read_csv(self.fname, sep=r'\s+',
+                             engine='python', nrows=0, **c_kw)
+        return [str(c).strip() for c in df.columns]
 
     def _read_excel(self):
         df = pd.read_excel(self.fname, sheet_name=self.sheet_name)

@@ -18,6 +18,23 @@ Spec format::
       Config:
         c0: "LV"
 
+Optional post-processing and metrics (consumed by the CLI when
+``--pivot`` is used; see :mod:`cicwave.analysis`)::
+
+    analysis:
+      preprocess:          # applied to the flat frame before pivoting
+        twos_complement:
+          width_bits: 10
+          columns: [ADC_RAW]   # omit to decode all non-time columns
+      steps:                 # run on the pivoted wide frame (headless / export)
+        - type: rms
+          column: "v(out)"
+        - type: dynamic_parameters
+          y_column: "v(out)"
+          fs: 1e6
+          f0: 100e3          # omit or <= 0 for auto (peak bin, dofft-style)
+          osr: 8              # optional; in-band noise like dofftsd.m
+
 Use ``--pivot-info`` to discover the cN keys for each condition column.
 """
 

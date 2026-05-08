@@ -43,6 +43,12 @@ def _resolve_wave_x_from_cli_env(cli_x):
     return None
 
 
+def _parse_twos_cols(s):
+    if not s or not str(s).strip():
+        return None
+    return tuple(x.strip() for x in str(s).split(",") if x.strip())
+
+
 def _expand_glob_patterns(files, patterns):
     """Merge positional ``files`` with files matched by --glob ``patterns``.
 
@@ -71,10 +77,33 @@ def _expand_glob_patterns(files, patterns):
 
 
 def _run_wave_pg(files, x, sheet, pivot_spec=None,
-                 pivot_info_flag=False, session_path=None, export_path=None):
+                 pivot_info_flag=False, session_path=None, export_path=None,
+                 csv_sep=None, csv_comment=None, twos_bits=None,
+                 twos_cols=None):
     """Run the PyQtGraph waveform viewer."""
     x = _resolve_wave_x_from_cli_env(x)
-    
+
+    if csv_sep is not None or csv_comment is not None or twos_bits is not None:
+        from .wavefiles import WaveFile
+        if twos_bits is not None:
+            WaveFile.set_twos_complement(twos_bits, _parse_twos_cols(twos_cols))
+        if csv_sep is not None:
+            try:
+                WaveFile.set_csv_sep_override(csv_sep)
+            except ValueError as e:
+                print("error: --csv-sep: %s" % e, file=sys.stderr)
+                sys.exit(2)
+        if csv_comment is not None:
+            #- ``""`` reaches us when the user explicitly disabled with
+            #- ``--csv-comment ''``; that is normalized to ``None`` inside
+            #- ``set_csv_comment_override`` and means "no stripping".
+            try:
+                WaveFile.set_csv_comment_override(csv_comment)
+            except ValueError as e:
+                print("error: --csv-comment: %s" % e, file=sys.stderr)
+                sys.exit(2)
+
+    spec = None
     if pivot_spec:
         from .pivot import load_spec, pivot_info, apply_pivot
         from .wavefiles import WaveFile
@@ -105,10 +134,22 @@ def _run_wave_pg(files, x, sheet, pivot_spec=None,
     if session_path:
         c.win.applySession(session_path)
 
+    summary_text = ""
     if pivot_spec:
+        from .analysis import preprocess_dataframe, run_analysis_steps
         for f in files:
             wf = WaveFile(f, x or "")
-            pivoted = apply_pivot(wf.df, spec)
+            raw = wf.df.copy()
+            a_block = (spec.get("analysis") or {})
+            raw = preprocess_dataframe(raw, a_block.get("preprocess", {}))
+            pivoted = apply_pivot(raw, spec)
+            if a_block.get("steps"):
+                ar = run_analysis_steps(
+                    pivoted, a_block["steps"],
+                    x_column=spec.get("columns"))
+                summary_text = ar.summary_text
+                if export_path and summary_text.strip():
+                    print(summary_text)
             name = "pivot(%s)" % os.path.basename(f)
             c.openDataFrame(pivoted, name,
                             pivot_spec_path=os.path.abspath(pivot_spec),
@@ -117,6 +158,9 @@ def _run_wave_pg(files, x, sheet, pivot_spec=None,
         for f in files:
             c.openFile(f, sheet_name=sheet)
 
+    if export_path and pivot_spec:
+        c.win._pending_export_metrics = summary_text or ""
+        c.win.autoplot_pivot_for_export()
     if export_path:
         c.exportAndExit(export_path)
     else:
@@ -135,9 +179,24 @@ def _run_wave_pg(files, x, sheet, pivot_spec=None,
 @click.option("--pivot-info", is_flag=True, default=False, help="Print pivot dimensions and exit")
 @click.option("--session", default=None, help="Load session file (.cicwave.yaml)")
 @click.option("--export", default=None, help="Export plot to file (PDF/PNG/SVG) and exit")
+@click.option("--csv-sep", "csv_sep", default=None, metavar="SEP",
+              help="Override CSV delimiter for all .csv files in this run "
+                   "(e.g. ';', '|', 'tab'). Disables auto-sniffing.")
+@click.option("--csv-comment", "csv_comment", default=None, metavar="STR",
+              help="Strip lines starting with STR from text data files "
+                   "(e.g. '#', '*', '//'). Pass '' to disable. "
+                   "Default: '#' for .dat/.spe/.cou/.chi; off for .csv/.tsv.")
+@click.option("--twos-complement", "twos_bits", default=None, type=int,
+              metavar="W",
+              help="Decode integer columns as W-bit 2's complement after load.")
+@click.option("--twos-complement-cols", "twos_cols", default=None,
+              metavar="LIST",
+              help="Comma-separated column names for --twos-complement "
+                   "(default: all except time/frequency sweep columns).")
 @click.option("--color/--no-color", default=True, help="Enable/Disable color output")
 @click.option("--debug", is_flag=True, default=False, help="Enable debug logging")
-def main(files, globs, x, sheet, pivot, pivot_info, session, export, color, debug):
+def main(files, globs, x, sheet, pivot, pivot_info, session, export, csv_sep,
+         csv_comment, twos_bits, twos_cols, color, debug):
     """cicwave: Advanced waveform viewer with PyQtGraph backend.
 
     A high-performance waveform viewer focused on PyQtGraph and Qt6 for
@@ -169,7 +228,9 @@ def main(files, globs, x, sheet, pivot, pivot_info, session, export, color, debu
     setup_logging(color=color, level=level)
     
     files = _expand_glob_patterns(files, globs)
-    _run_wave_pg(files, x, sheet, pivot, pivot_info, session, export)
+    _run_wave_pg(files, x, sheet, pivot, pivot_info, session, export,
+                 csv_sep=csv_sep, csv_comment=csv_comment,
+                 twos_bits=twos_bits, twos_cols=twos_cols)
 
 
 if __name__ == "__main__":
