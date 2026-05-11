@@ -531,16 +531,15 @@ class PgWave:
     def _apply_render_opts(curve):
         """Per-curve options safe to apply at construction time.
 
-        ``autoDownsample`` and ``clipToView`` are NOT set here -- they
-        slice the data array using the ViewBox's current rect, but at
-        construction the ViewBox still holds its default
-        ``(-0.5, -0.5, 1, 1)`` rect (autoRange has not run yet because
-        the first curve is still being added). With a 7e-6 s data span
-        and a 1.0 unit view rect, autoDownsample picks a downsample
-        factor of ~300 000, collapsing the curve to a single point;
-        clipToView then keeps it that way. The resulting empty plot is
-        what users saw on macOS. Those options are applied by
-        :meth:`_enable_view_dependent_opts` after ``autoRange()``.
+        ``clipToView`` is NOT set here — it slices the data using the
+        ViewBox's current rect, but at construction the ViewBox still
+        holds its default ``(-0.5, -0.5, 1, 1)`` rect (autoRange has
+        not run yet because the first curve is still being added). With
+        a real transient span versus that default rect, clipToView alone
+        can yield no visible samples until the rect is sane. Turning on
+        :meth:`_enable_view_dependent_opts` after ``autoRange()`` avoids
+        that (see there for why downsampling/resampling stays off by
+        default).
 
         ``setDynamicRangeLimit`` IS safe at construction: it clamps
         y-values relative to the view rect at draw time (not at
@@ -566,8 +565,11 @@ class PgWave:
 
     @staticmethod
     def _enable_view_dependent_opts(curve):
-        """Enable ``setDownsampling(auto=True)`` and ``clipToView`` once
-        the ViewBox has a real view rect.
+        """Enable ``clipToView`` once the ViewBox has a real view rect.
+
+        Downsampling/subpixel resampling is left off by default: PyQtGraph's
+        ``subsample`` path can hide narrow spikes or glitches the user expects
+        to see in a waveform viewer.
 
         Must be invoked after ``autoRange()`` so the visible-range slice
         actually contains data; otherwise the curve renders empty.
@@ -577,7 +579,7 @@ class PgWave:
         if curve is None:
             return
         try:
-            curve.setDownsampling(auto=True, method='subsample')
+            curve.setDownsampling(auto=False)
         except Exception:
             pass
         try:
@@ -1786,11 +1788,9 @@ class PgWavePlot(QWidget):
             vb.enableAutoRange()
             vb.autoRange()
 
-        #- Enable autoDownsample and clipToView only AFTER autoRange so
-        #- the curve has a valid view rect; otherwise the first display
-        #- would clip / over-downsample against the empty default rect
-        #- (~300 000x downsample for transient data) and render no
-        #- points -- the bug that made macOS plots appear blank.
+        #- Enable clipToView only AFTER autoRange so the curve has a valid
+        #- view rect; otherwise the first display would slice against the
+        #- empty default rect and render nothing (blank macOS plot bug).
         PgWave._enable_view_dependent_opts(curve)
 
         self._update_readout()
@@ -1828,7 +1828,7 @@ class PgWavePlot(QWidget):
     def autoSize(self):
         """Fit every axis to its full data extent.
 
-        ``clipToView`` and ``autoDownsample`` both make
+        ``clipToView`` and (if enabled) ``autoDownsample`` both make
         :meth:`PlotCurveItem.dataBounds` report only the *currently
         displayed* slice, so a naive ``autoRange()`` after a zoom-in
         would just refit to that slice (looking like a one-step undo).
