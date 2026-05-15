@@ -452,6 +452,7 @@ class WaveFile():
         '.json':    lambda self: pd.read_json(self.fname),
         '.parquet': lambda self: pd.read_parquet(self.fname),
         '.feather': lambda self: pd.read_feather(self.fname),
+        '.npz':     lambda self: read_npz(self.fname),
         '.h5':      lambda self: pd.read_hdf(self.fname),
         '.hdf5':    lambda self: pd.read_hdf(self.fname),
         '.html':    lambda self: pd.read_html(self.fname)[0],
@@ -817,6 +818,94 @@ class WaveFiles(dict):
     def getSelected(self):
         if(self.current is not None):
             return self[self.current]
+
+
+# ---------------------------------------------------------------------------
+# NumPy .npz archives
+# ---------------------------------------------------------------------------
+
+def _npz_apply_frequency_aliases(df):
+    """Add ``frequency`` (Hz) when only rnsr-style keys are present.
+
+    Swept-capture artifacts often store ``freqs_hz`` / ``freqs_mhz`` while
+    :class:`Wave` auto-selects a column named ``frequency``."""
+    if df is None or df.empty:
+        return
+    if "frequency" in df.columns:
+        return
+    if "freqs_hz" in df.columns:
+        df["frequency"] = df["freqs_hz"]
+    elif "freqs_mhz" in df.columns:
+        df["frequency"] = np.asarray(df["freqs_mhz"], dtype=np.float64) * 1e6
+
+
+def _npz_arrays_to_dataframe(arrays):
+    """Merge archive arrays into one rectangular DataFrame.
+
+    * 0-D arrays broadcast to the table length.
+    * 1-D arrays align on the dominant row count (most common among
+      non-scalar arrays). Shorter / longer series are skipped.
+    * 2-D arrays ``(n, k)`` split into ``name__0`` … ``name__{k-1}``.
+    * ``object`` dtypes are skipped (pickle-free ``.npz`` rarely uses them).
+    """
+    from collections import Counter
+
+    scalars = {}
+    parsed = {}
+    for name, arr in sorted(arrays.items()):
+        a = np.asarray(arr)
+        if a.dtype == object:
+            continue
+        if a.ndim == 0:
+            scalars[name] = a
+        elif a.ndim == 1:
+            parsed[name] = ("1d", a)
+        elif a.ndim == 2:
+            parsed[name] = ("2d", a)
+        #- Higher dims: skip (too ambiguous for a flat table).
+    lengths = [v[1].shape[0] for v in parsed.values()]
+    if lengths:
+        n = Counter(lengths).most_common(1)[0][0]
+    elif scalars:
+        n = 1
+    else:
+        return pd.DataFrame()
+
+    cols = {}
+    for name, (kind, a) in parsed.items():
+        if kind == "1d":
+            if a.shape[0] == n:
+                cols[name] = np.asarray(a)
+            elif a.shape[0] == 1 and n > 1:
+                cols[name] = np.full(n, a[0], dtype=a.dtype)
+            else:
+                continue
+        else:
+            if a.shape[0] != n:
+                continue
+            k = a.shape[1]
+            if k == 1:
+                cols[name] = a[:, 0]
+            else:
+                for j in range(k):
+                    cols["%s__%d" % (name, j)] = a[:, j]
+    for name, a in scalars.items():
+        cols[name] = np.full(n, a.item(), dtype=a.dtype)
+    return pd.DataFrame(cols)
+
+
+def read_npz(fname):
+    """Load a NumPy ``.npz`` archive into a DataFrame.
+
+    Intended for bench artifacts (e.g. rnsr ``swept_*.npz`` with
+    ``freqs_hz`` / ``amps_dbm`` and optional scalar metadata) and other
+    tabular saves. Uses ``allow_pickle=False`` for safety.
+    """
+    with np.load(fname, allow_pickle=False) as z:
+        arrays = {k: z[k] for k in z.files}
+    df = _npz_arrays_to_dataframe(arrays)
+    _npz_apply_frequency_aliases(df)
+    return df
 
 
 # ---------------------------------------------------------------------------

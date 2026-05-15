@@ -202,8 +202,8 @@ def main(files, globs, x, sheet, pivot, pivot_info, session, export, csv_sep,
     A high-performance waveform viewer focused on PyQtGraph and Qt6 for
     advanced visualization of simulation data.
 
-    Supports: .raw, .csv, .tsv, .xlsx, .json, .parquet, .feather, .h5,
-    .pkl, .vcd (digital), .iqvsa (LitePoint), and more.
+    Supports: .raw, .csv, .tsv, .xlsx, .json, .parquet, .feather, .npz,
+    .h5, .pkl, .vcd (digital), .iqvsa (LitePoint), and more.
 
     \b
     Pivot:

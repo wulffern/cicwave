@@ -8,6 +8,7 @@ Supports multiple file formats:
 - ngspice .raw files
 - CSV, TSV, Excel 
 - Parquet, HDF5, Feather
+- NumPy .npz archives (tabular / bench traces)
 - VCD digital waveforms
 - LitePoint .iqvsa IQ capture files
 
