@@ -49,20 +49,49 @@ def _parse_twos_cols(s):
     return tuple(x.strip() for x in str(s).split(",") if x.strip())
 
 
+#- Glob metacharacters. A positional arg containing any of these (and not
+#- matching a literal file on disk) is treated as a pattern and expanded.
+#- This makes ``cicwave path/*.npz`` work on shells that don't auto-expand
+#- wildcards for external commands (notably PowerShell and cmd.exe).
+_GLOB_META = ("*", "?", "[")
+
+
+def _looks_like_glob(s):
+    return any(ch in s for ch in _GLOB_META)
+
+
 def _expand_glob_patterns(files, patterns):
     """Merge positional ``files`` with files matched by --glob ``patterns``.
 
-    Each pattern is expanded with ``glob.glob(..., recursive=True)`` so that
-    ``**`` works. Order: positional first, then each pattern in order. Files
-    are de-duplicated while preserving first-seen order. Patterns that match
-    nothing are reported on stderr but not fatal.
+    Positional args are kept verbatim when they name an existing file;
+    otherwise, if they contain glob metacharacters (``*?[``) they are
+    expanded with ``glob.glob(..., recursive=True)`` too, so wildcard paths
+    work even on shells that don't expand them for external commands (e.g.
+    PowerShell). ``--glob`` patterns are always expanded. Order: positional
+    first (in order), then each ``--glob`` pattern. Files are de-duplicated
+    while preserving first-seen order. Patterns that match nothing are
+    reported on stderr but are not fatal.
     """
     out = []
     seen = set()
+
+    def _add(path):
+        if path not in seen:
+            seen.add(path)
+            out.append(path)
+
     for f in files:
-        if f not in seen:
-            seen.add(f)
-            out.append(f)
+        if os.path.exists(f) or not _looks_like_glob(f):
+            #- Existing file, or a plain path (let downstream report a
+            #- genuine missing-file error rather than silently dropping it).
+            _add(f)
+            continue
+        matches = sorted(_glob.glob(f, recursive=True))
+        if not matches:
+            print("warning: '%s' matched no files" % f, file=sys.stderr)
+            continue
+        for m in matches:
+            _add(m)
     for pat in patterns or ():
         matches = sorted(_glob.glob(pat, recursive=True))
         if not matches:
@@ -70,9 +99,7 @@ def _expand_glob_patterns(files, patterns):
                   file=sys.stderr)
             continue
         for m in matches:
-            if m not in seen:
-                seen.add(m)
-                out.append(m)
+            _add(m)
     return tuple(out)
 
 

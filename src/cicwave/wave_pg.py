@@ -136,7 +136,26 @@ def _eng(value, unit=""):
 def _to_numeric(arr):
     """Convert array to float. For string data, return (indices, labels)."""
     try:
-        return np.real(np.array(arr, dtype=float)), None
+        a = np.asarray(arr)
+        if np.iscomplexobj(a):
+            a = a.real
+        return a.astype(float), None
+    except (ValueError, TypeError):
+        labels = [str(v) for v in arr]
+        return np.arange(len(labels), dtype=float), labels
+
+
+def _to_numeric_keep_complex(arr):
+    """Like :func:`_to_numeric` but preserve complex (IQ) data.
+
+    Returns ``(array, labels)`` where *array* keeps its complex dtype when the
+    source is complex; for string data it falls back to indices + labels.
+    """
+    try:
+        a = np.asarray(arr)
+        if np.iscomplexobj(a):
+            return a.astype(complex), None
+        return a.astype(float), None
     except (ValueError, TypeError):
         labels = [str(v) for v in arr]
         return np.arange(len(labels), dtype=float), labels
@@ -3913,8 +3932,34 @@ class PgWaveWindow(QMainWindow):
         y, _ = _to_numeric(wave.y)
 
         if atype == "fft":
-            self._do_fft(wave.key, x, y, wave.xunit, wave.yunit,
-                          dbfs_amplitude=None)
+            #- Keep complex (IQ) samples so the FFT can produce a two-sided
+            #- spectrum instead of discarding the imaginary part.
+            y_fft, _ = _to_numeric_keep_complex(wave.y)
+            #- IQ captures may have no x column; fall back to a sample-rate
+            #- derived time base (sidecar metadata) or a unit sample index
+            #- so the FFT never silently no-ops on a length mismatch.
+            iq_meta = {}
+            try:
+                iq_meta = wave.wfile.df.attrs.get("cicwave_iq", {}) or {}
+            except Exception:
+                iq_meta = {}
+            x_arr = np.atleast_1d(np.asarray(x)) if x is not None else None
+            if (x_arr is None or x_arr.ndim != 1
+                    or x_arr.size != len(y_fft)):
+                fs = iq_meta.get("samp_rate_hz")
+                if fs:
+                    x = np.arange(len(y_fft), dtype=np.float64) / float(fs)
+                else:
+                    x = np.arange(len(y_fft), dtype=np.float64)
+            else:
+                x = x_arr
+            #- Two-sided complex spectra are centred on DC; shift them to the
+            #- real RF carrier when the capture recorded one.
+            freq_offset_hz = 0.0
+            if np.iscomplexobj(y_fft):
+                freq_offset_hz = float(iq_meta.get("center_hz", 0.0) or 0.0)
+            self._do_fft(wave.key, x, y_fft, wave.xunit, wave.yunit,
+                          dbfs_amplitude=None, freq_offset_hz=freq_offset_hz)
         elif atype == "histogram":
             self._do_histogram(wave.key, y, wave.yunit)
         elif atype == "differentiate":
@@ -3952,7 +3997,8 @@ class PgWaveWindow(QMainWindow):
         self.tab_widget.setCurrentWidget(w)
         return w
 
-    def _do_fft(self, name, x, y, xunit, yunit, dbfs_amplitude=None):
+    def _do_fft(self, name, x, y, xunit, yunit, dbfs_amplitude=None,
+                freq_offset_hz=0.0):
         n = len(y)
         if n < 2:
             return
@@ -3963,7 +4009,14 @@ class PgWaveWindow(QMainWindow):
             return
         freqs = res.freq_hz
         psd_db = res.psd_db
+        two_sided = bool(res.meta.get("two_sided"))
+        #- Shift a two-sided baseband spectrum onto the real RF carrier.
+        offset = float(freq_offset_hz or 0.0)
+        if offset and two_sided:
+            freqs = freqs + offset
         title = "FFT: %s" % name
+        if two_sided:
+            title += " (two-sided)"
         if res.meta.get("resampled"):
             title += " (resampled)"
         if res.meta.get("dbfs"):
@@ -3973,7 +4026,9 @@ class PgWaveWindow(QMainWindow):
         w.setLabel('bottom', 'Frequency', units='Hz')
         ylab = 'PSD (dBFS)' if res.meta.get('dbfs') else 'PSD (dBc)'
         w.setLabel('left', ylab, units='dB')
-        if len(freqs) > 1 and freqs[0] > 0:
+        #- Log-frequency only makes sense for a single-sided (real) spectrum;
+        #- a two-sided spectrum spans negative frequencies.
+        if not two_sided and len(freqs) > 1 and freqs[0] > 0:
             w.setLogMode(x=True, y=False)
 
     def _do_snr_dialog(self, wave, x, y):

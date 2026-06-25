@@ -894,17 +894,95 @@ def _npz_arrays_to_dataframe(arrays):
     return pd.DataFrame(cols)
 
 
+def _npz_read_sidecar(fname):
+    """Return the sibling ``<base>.json`` sidecar dict, or ``None``.
+
+    SDR IQ captures (``*_iq.npz``) often store only the complex ``iq`` array
+    and keep acquisition metadata (``samp_rate_hz``, ``center_mhz``, …) in a
+    JSON sidecar next to the archive.
+    """
+    import json
+
+    side = os.path.splitext(fname)[0] + ".json"
+    if not os.path.exists(side):
+        return None
+    try:
+        with open(side, "r", encoding="utf-8") as fh:
+            meta = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    return meta if isinstance(meta, dict) else None
+
+
+def _npz_sidecar_sample_rate(meta):
+    """Positive ``samp_rate_hz`` from a sidecar dict, else ``None``."""
+    if not meta:
+        return None
+    try:
+        fs = float(meta.get("samp_rate_hz"))
+    except (TypeError, ValueError):
+        return None
+    return fs if np.isfinite(fs) and fs > 0 else None
+
+
+def _npz_sidecar_center_hz(meta):
+    """Center frequency (Hz) from a sidecar dict, else ``None``.
+
+    Accepts ``center_hz`` directly or ``center_mhz`` (converted)."""
+    if not meta:
+        return None
+    val = meta.get("center_hz")
+    scale = 1.0
+    if val is None:
+        val = meta.get("center_mhz")
+        scale = 1e6
+    try:
+        c = float(val) * scale
+    except (TypeError, ValueError):
+        return None
+    return c if np.isfinite(c) else None
+
+
+def _npz_apply_time_axis(df, fname):
+    """Add a ``time`` column + IQ metadata for SDR captures via the sidecar.
+
+    Only applies when the frame has no existing time/frequency x-axis and a
+    sibling JSON gives a usable ``samp_rate_hz``; this lets the viewer plot
+    IQ vs seconds and the FFT report real Hz instead of cycles/sample. The
+    sample rate and (optional) RF center are also stashed on ``df.attrs``
+    under ``cicwave_iq`` so the FFT can label a two-sided spectrum at the
+    real carrier frequency.
+    """
+    if df is None or df.empty:
+        return
+    if any(c in df.columns for c in ("time", "frequency")):
+        return
+    meta = _npz_read_sidecar(fname)
+    fs = _npz_sidecar_sample_rate(meta)
+    if fs is None:
+        return
+    n = len(df)
+    df.insert(0, "time", np.arange(n, dtype=np.float64) / fs)
+    info = {"samp_rate_hz": fs}
+    center_hz = _npz_sidecar_center_hz(meta)
+    if center_hz is not None:
+        info["center_hz"] = center_hz
+    df.attrs["cicwave_iq"] = info
+
+
 def read_npz(fname):
     """Load a NumPy ``.npz`` archive into a DataFrame.
 
-    Intended for bench artifacts (e.g. rnsr ``swept_*.npz`` with
-    ``freqs_hz`` / ``amps_dbm`` and optional scalar metadata) and other
-    tabular saves. Uses ``allow_pickle=False`` for safety.
+    Intended for bench artifacts (e.g. swept captures with ``freqs_hz`` /
+    ``amps_dbm`` and optional scalar metadata, or ``*_iq.npz`` complex SDR
+    captures with a JSON sidecar) and other tabular saves. Uses
+    ``allow_pickle=False`` for safety.
     """
     with np.load(fname, allow_pickle=False) as z:
         arrays = {k: z[k] for k in z.files}
     df = _npz_arrays_to_dataframe(arrays)
     _npz_apply_frequency_aliases(df)
+    _npz_apply_time_axis(df, fname)
     return df
 
 

@@ -68,6 +68,35 @@ class TestPsdRfft(unittest.TestCase):
         self.assertLess(mx, 0.5)
         self.assertGreater(mx, -8.0)
 
+    def test_complex_is_two_sided(self):
+        #- A positive-frequency complex exponential has energy on the +f
+        #- side only; a real cosine would show both +/- lobes.
+        fs = 1000.0
+        n = 512
+        t = np.arange(n) / fs
+        f0 = 100.0
+        y = np.exp(2j * np.pi * f0 * t)
+        r = analysis.psd_rfft(t, y, auto_resample=False)
+        self.assertTrue(r.meta.get("two_sided"))
+        #- Two-sided axis spans negative frequencies and is sorted.
+        self.assertLess(float(r.freq_hz[0]), 0.0)
+        self.assertGreater(float(r.freq_hz[-1]), 0.0)
+        self.assertTrue(np.all(np.diff(r.freq_hz) > 0))
+        self.assertEqual(len(r.freq_hz), len(r.psd_db))
+        #- Peak sits at +f0, not -f0.
+        kpk = int(np.argmax(r.psd_db))
+        self.assertGreater(float(r.freq_hz[kpk]), 0.0)
+        self.assertAlmostEqual(float(r.freq_hz[kpk]), f0, delta=fs / n)
+
+    def test_real_is_single_sided(self):
+        fs = 1000.0
+        n = 512
+        t = np.arange(n) / fs
+        y = np.cos(2 * np.pi * 100.0 * t)
+        r = analysis.psd_rfft(t, y, auto_resample=False)
+        self.assertFalse(r.meta.get("two_sided"))
+        self.assertTrue(np.all(r.freq_hz >= 0.0))
+
     def test_dbfs_peak_amplitude_128_reference(self):
         fs = 1000.0
         n = 256

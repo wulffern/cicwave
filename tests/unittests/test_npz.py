@@ -64,6 +64,45 @@ class ReadNpzTest(unittest.TestCase):
         self.assertIn("mat__1", df.columns)
         self.assertIn("mat__2", df.columns)
 
+    def test_complex_iq_column_preserved(self):
+        p = self._path("iq.npz")
+        iq = (np.arange(8) + 1j * np.arange(8)).astype(np.complex64)
+        np.savez_compressed(p, iq=iq)
+        df = read_npz(p)
+        self.assertIn("iq", df.columns)
+        self.assertTrue(np.iscomplexobj(df["iq"].to_numpy()))
+
+    def test_iq_sidecar_adds_time_axis(self):
+        import json
+        p = self._path("sdr_iq.npz")
+        n = 16
+        iq = np.ones(n, dtype=np.complex64)
+        np.savez_compressed(p, iq=iq)
+        with open(self._path("sdr_iq.json"), "w", encoding="utf-8") as fh:
+            json.dump({"samp_rate_hz": 16e6, "center_mhz": 1000.0}, fh)
+        df = read_npz(p)
+        self.assertIn("time", df.columns)
+        t = df["time"].to_numpy()
+        self.assertAlmostEqual(t[1] - t[0], 1.0 / 16e6)
+
+    def test_iq_without_sidecar_has_no_time_axis(self):
+        p = self._path("plain_iq.npz")
+        np.savez_compressed(p, iq=np.ones(8, dtype=np.complex64))
+        df = read_npz(p)
+        self.assertNotIn("time", df.columns)
+
+    def test_iq_sidecar_records_center_and_rate_in_attrs(self):
+        import json
+        p = self._path("sdr2_iq.npz")
+        np.savez_compressed(p, iq=np.ones(8, dtype=np.complex64))
+        with open(self._path("sdr2_iq.json"), "w", encoding="utf-8") as fh:
+            json.dump({"samp_rate_hz": 16e6, "center_mhz": 1000.0}, fh)
+        df = read_npz(p)
+        info = df.attrs.get("cicwave_iq")
+        self.assertIsNotNone(info)
+        self.assertAlmostEqual(info["samp_rate_hz"], 16e6)
+        self.assertAlmostEqual(info["center_hz"], 1000e6)
+
 
 if __name__ == "__main__":
     unittest.main()

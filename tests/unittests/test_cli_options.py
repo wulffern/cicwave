@@ -5,13 +5,15 @@ Focused on the flags with non-trivial validation that runs before the
 GUI is imported (``--csv-sep`` and ``--csv-comment``).
 """
 
+import os
+import tempfile
 import unittest
 from unittest import mock
 
 from click.testing import CliRunner
 
 import cicwave.cli as cli_mod
-from cicwave.cli import main
+from cicwave.cli import main, _expand_glob_patterns
 from cicwave.wavefiles import WaveFile, _UNSET
 
 
@@ -66,6 +68,46 @@ class TestCsvCommentCliFlag(unittest.TestCase):
             self.assertEqual(result.exit_code, 0)
             run.assert_called_once()
             self.assertEqual(run.call_args.kwargs.get("csv_comment"), "")
+
+
+class TestPositionalGlobExpansion(unittest.TestCase):
+    """Positional wildcard paths must expand even when the shell doesn't.
+
+    PowerShell / cmd.exe pass ``dir/*.npz`` verbatim to external commands;
+    the CLI expands such args itself so ``cicwave dir/*.npz`` just works.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="cicwave-glob-")
+        for name in ("a.npz", "b.npz"):
+            open(os.path.join(self.tmp, name), "wb").close()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_wildcard_positional_expands(self):
+        pat = os.path.join(self.tmp, "*.npz")
+        out = _expand_glob_patterns((pat,), ())
+        self.assertEqual(
+            sorted(os.path.basename(p) for p in out), ["a.npz", "b.npz"])
+
+    def test_literal_existing_path_kept(self):
+        lit = os.path.join(self.tmp, "a.npz")
+        out = _expand_glob_patterns((lit,), ())
+        self.assertEqual(out, (lit,))
+
+    def test_plain_missing_path_preserved(self):
+        # No glob chars: keep verbatim so downstream reports a real error
+        # rather than silently dropping a typo'd path.
+        missing = os.path.join(self.tmp, "nope.npz")
+        out = _expand_glob_patterns((missing,), ())
+        self.assertEqual(out, (missing,))
+
+    def test_nonmatching_wildcard_dropped(self):
+        pat = os.path.join(self.tmp, "*.csv")
+        out = _expand_glob_patterns((pat,), ())
+        self.assertEqual(out, ())
 
 
 if __name__ == "__main__":

@@ -87,7 +87,11 @@ def resample_uniform(
     Default *dt* is the median positive ``diff(x)``.
     """
     x = np.asarray(x, dtype=np.float64)
-    y = np.asarray(y, dtype=np.float64)
+    y = np.asarray(y)
+    if np.iscomplexobj(y):
+        y = y.astype(np.complex128)
+    else:
+        y = y.astype(np.float64)
     if len(x) != len(y) or len(x) < 2:
         raise ValueError("x and y must have the same length >= 2")
     dx = np.diff(x)
@@ -109,7 +113,12 @@ def resample_uniform(
         x_new = np.arange(x0, x1 + 0.5 * dt, dt, dtype=np.float64)
         if len(x_new) < 2:
             x_new = np.array([x0, x1], dtype=np.float64)
-    y_new = np.interp(x_new, x, y)
+    if np.iscomplexobj(y):
+        #- np.interp is real-only; interpolate the two parts separately.
+        y_new = (np.interp(x_new, x, y.real)
+                 + 1j * np.interp(x_new, x, y.imag))
+    else:
+        y_new = np.interp(x_new, x, y)
     fs = 1.0 / dt
     return UniformResampleResult(x_new=x_new, y_new=y_new, fs=fs)
 
@@ -128,23 +137,33 @@ def psd_rfft(
         auto_resample: bool = True,
         irregularity_threshold: float = 0.2,
         dbfs_amplitude: Optional[float] = None) -> PsdResult:
-    """Single-sided PSD (Hanning window) vs frequency.
+    """PSD (Hanning window) vs frequency.
+
+    For **real** *y* the spectrum is single-sided (``rfft``); for **complex**
+    *y* (analytic / IQ data) it is two-sided and ``fftshift``-ed so the
+    frequency axis runs from ``-fs/2`` to just below ``+fs/2`` with DC in the
+    middle (``meta["two_sided"]`` reports which case applies).
 
     If *dbfs_amplitude* is ``None``, output is **dB relative to peak**
-    (matches legacy cicwave: ``10*log10(psd / max(psd))``), DC bin dropped.
+    (matches legacy cicwave: ``10*log10(psd / max(psd))``); for the real
+    case the DC bin is dropped, the complex case keeps every bin.
 
     If *dbfs_amplitude* is set (*A_fs*, **peak** amplitude of a full-scale
-    sine in the same units as *y*), each **positive-frequency** bin carries
-    power ``P_k`` from Parseval (interior bins: ``2|Y[k]|²/N``, Nyquist and
-    DC handled separately).  The plot is **10·log10(P_k / E_ref)** with
-    ``E_ref = (A_fs²/2) · Σ w[n]²``, i.e. the expected **total** energy of
-    a full-scale sine after the same Hanning window (sin² → ½).  A coherent
-    full-scale tone then peaks **at or a few dB below 0 dBFS** because the
-    window spreads energy across bins — not a single bin at exactly 0 dBFS.
+    sine in the same units as *y*), each bin carries power ``P_k`` from
+    Parseval.  For the real single-sided case interior bins are doubled
+    (``2|Y[k]|²/N``, Nyquist and DC handled separately); the complex
+    two-sided case uses ``|Y[k]|²/N`` directly (no doubling).  The plot is
+    **10·log10(P_k / E_ref)** with ``E_ref = (A_fs²/2) · Σ w[n]²``, i.e. the
+    expected **total** energy of a full-scale sine after the same Hanning
+    window (sin² → ½).  A coherent full-scale tone then peaks **at or a few
+    dB below 0 dBFS** because the window spreads energy across bins — not a
+    single bin at exactly 0 dBFS.
     """
     x = np.asarray(x, dtype=np.float64)
-    y = np.asarray(y, dtype=np.float64)
-    meta: dict[str, Any] = {}
+    y = np.asarray(y)
+    is_complex = np.iscomplexobj(y)
+    y = y.astype(np.complex128) if is_complex else y.astype(np.float64)
+    meta: dict[str, Any] = {"two_sided": bool(is_complex)}
     if len(y) < 2:
         raise ValueError("need at least 2 samples")
     if len(x) != len(y):
@@ -168,33 +187,44 @@ def psd_rfft(
     n = len(y)
     w = np.hanning(n)
     yw = y * w
-    Y = np.fft.rfft(yw)
-    freqs_all = np.fft.rfftfreq(n, d=dt)
+    if is_complex:
+        Y = np.fft.fftshift(np.fft.fft(yw))
+        freqs_all = np.fft.fftshift(np.fft.fftfreq(n, d=dt))
+    else:
+        Y = np.fft.rfft(yw)
+        freqs_all = np.fft.rfftfreq(n, d=dt)
+
+    #- Real spectra are single-sided: drop the DC bin (legacy behaviour) and
+    #- double interior bins for Parseval. Complex spectra are two-sided and
+    #- already centred on DC, so keep every bin and never double.
+    drop = 1 if not is_complex else 0
 
     if dbfs_amplitude is not None and np.isfinite(dbfs_amplitude):
         if dbfs_amplitude <= 0:
             raise ValueError("dbfs_amplitude must be positive")
         A_fs = float(dbfs_amplitude)
-        #- Parseval-consistent bin power for a **real** windowed sequence:
-        #- ``sum((yw)²) = (1/N) · (|Y0|² + 2·Σ|Yk|² + |Y_{N/2}|²)`` (N even).
+        #- Parseval-consistent bin power. Real (one-sided):
+        #- ``sum((yw)²) = (1/N)·(|Y0|² + 2·Σ|Yk|² + |Y_{N/2}|²)`` (N even).
+        #- Complex (two-sided): ``sum(|yw|²) = (1/N)·Σ|Yk|²`` — no doubling.
         p_bin = np.abs(Y) ** 2
-        if n % 2 == 0:
-            p_bin[1:-1] *= 2.0
-        else:
-            p_bin[1:] *= 2.0
+        if not is_complex:
+            if n % 2 == 0:
+                p_bin[1:-1] *= 2.0
+            else:
+                p_bin[1:] *= 2.0
         p_bin /= float(n)
         ref_energy = 0.5 * (A_fs ** 2) * float(np.sum(w * w))
         ref_energy = max(ref_energy, 1e-300)
         p_bin = np.maximum(p_bin, 1e-300)
-        psd_db = 10.0 * np.log10(p_bin[1:] / ref_energy)
-        freqs = freqs_all[1:len(p_bin)]
+        psd_db = 10.0 * np.log10(p_bin[drop:] / ref_energy)
+        freqs = freqs_all[drop:len(p_bin)]
         meta["dbfs"] = True
         meta["dbfs_ref_energy"] = ref_energy
     else:
         psd = np.abs(Y) ** 2
-        psd = np.maximum(psd[1:], 1e-300)
+        psd = np.maximum(psd[drop:], 1e-300)
         psd_db = 10.0 * np.log10(psd / np.max(psd))
-        freqs = freqs_all[1:]
+        freqs = freqs_all[drop:]
         meta["dbfs"] = False
 
     return PsdResult(freq_hz=freqs, psd_db=psd_db, meta=meta)
