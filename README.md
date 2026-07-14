@@ -40,6 +40,8 @@ repo. As such, you're here.
   - VCD digital waveforms 
   - LitePoint `.iqvsa` IQ capture files
   - Statistical formats: Stata (`.dta`), SAS (`.sas7bdat`), SPSS (`.sav`)
+- **URL data sources**: load CSV/JSON/Excel/Parquet/... straight from an
+  `http(s)://` URL — REST APIs, hosted datasets, anything pandas can read
 - **Multi-dimensional data pivoting** with YAML specifications
 - **Digital waveform support** with separate analog/digital panes  
 - **Session save/restore** with `.cicwave.yaml` files
@@ -89,6 +91,14 @@ cicwave --csv-comment '' eldo.cou              # disable default for .cou
 ```
 
 ### Advanced Features
+
+**Load data from a URL:**
+```bash
+cicwave https://raw.githubusercontent.com/owid/co2-data/master/owid-co2-data.csv
+
+# Extension-less REST endpoint: force the format
+cicwave https://api.example.com/v1/measurements --format json
+```
 
 **Multi-dimensional data reshaping:**
 ```bash

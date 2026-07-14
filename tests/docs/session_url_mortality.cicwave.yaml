@@ -1,0 +1,18 @@
+files:
+  - path: mortality_url_snapshot.csv
+    pivot: pivot_spec_mortality.yaml
+plots:
+  - name: Excess mortality
+    title: Excess mortality (P-score, % above baseline)
+    xlabel: Year
+    ylabel: P-score (%)
+    waves:
+      - file: 0
+        name: "United States"
+        style: Lines
+      - file: 0
+        name: "Germany"
+        style: Lines
+      - file: 0
+        name: "France"
+        style: Lines

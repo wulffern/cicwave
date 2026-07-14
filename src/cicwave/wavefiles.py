@@ -30,11 +30,70 @@ import csv as _csv_mod
 import io as _io
 import os
 import re
+import urllib.error
+import urllib.parse
+import urllib.request
 import numpy as np
 import pandas as pd
 from matplotlib.ticker import EngFormatter
 
 from .ngraw import toDataFrame as _ngraw_toDataFrame
+
+
+# ---------------------------------------------------------------------------
+# URL-based data sources (REST endpoints, hosted CSV/JSON, ...).
+# ---------------------------------------------------------------------------
+
+_URL_RE = re.compile(r'^https?://', re.IGNORECASE)
+
+
+def _is_url(s):
+    return bool(_URL_RE.match(str(s)))
+
+
+#- Safety cap so an unbounded / malicious endpoint can't exhaust memory.
+_URL_MAX_BYTES = 200 * 1024 * 1024  # 200 MB
+_URL_TIMEOUT_S = 30
+
+#- Content-Type -> extension, used when a URL has no recognizable suffix
+#- (typical for REST API endpoints) and no explicit ``--format`` was given.
+_CONTENT_TYPE_EXT = {
+    'text/csv': '.csv',
+    'application/csv': '.csv',
+    'text/tab-separated-values': '.tsv',
+    'application/json': '.json',
+    'text/json': '.json',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+    'application/vnd.ms-excel': '.xls',
+    'text/html': '.html',
+    'application/xml': '.xml',
+    'text/xml': '.xml',
+    'application/parquet': '.parquet',
+    'application/vnd.apache.parquet': '.parquet',
+}
+
+
+def _fetch_url(url, timeout=_URL_TIMEOUT_S, max_bytes=_URL_MAX_BYTES):
+    """Fetch *url* into memory. Returns ``(bytes, content_type_or_None)``.
+
+    Raises :class:`ValueError` with a readable message on network/HTTP
+    errors instead of leaking urllib's exception types up to the UI.
+    """
+    req = urllib.request.Request(url, headers={"User-Agent": "cicwave"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            content_type = resp.headers.get_content_type()
+            data = resp.read(max_bytes + 1)
+    except urllib.error.HTTPError as e:
+        raise ValueError(
+            "failed to fetch %s: HTTP %s %s" % (url, e.code, e.reason)) from e
+    except urllib.error.URLError as e:
+        raise ValueError("failed to fetch %s: %s" % (url, e.reason)) from e
+    if len(data) > max_bytes:
+        raise ValueError(
+            "%s exceeds the %d MB download limit" %
+            (url, max_bytes // (1024 * 1024)))
+    return data, content_type
 
 
 #- Sentinel used by ``WaveFile.csv_comment_override`` to distinguish
@@ -321,7 +380,22 @@ class WaveFile():
     #- class attribute so tests / external callers can introspect.
     _WHITESPACE_EXTS = ('.dat', '.spe', '.cou', '.chi')
 
-    def __init__(self, fname, xaxis, sheet_name=0, df=None):
+    #- Blocked for URL sources: unpickling / HDF5 loading from an
+    #- arbitrary remote endpoint is a deserialization / native-library
+    #- risk we don't want to take on a user-supplied URL.
+    _REMOTE_BLOCKED_EXTS = {'.pkl', '.pickle', '.h5', '.hdf5'}
+
+    #- Formats that need their format-specific local-file parser
+    #- (custom text parsing, sidecar files, etc.) and aren't worth
+    #- porting to an in-memory buffer yet — not realistic REST payloads
+    #- anyway (lab-instrument formats, not climate/health datasets).
+    _REMOTE_UNSUPPORTED_EXTS = {
+        '.raw', '.vcd', '.iqvsa', '.prn', '.npz',
+        '.dat', '.spe', '.cou', '.chi',
+        '.stata', '.dta', '.sas7bdat', '.sav',
+    }
+
+    def __init__(self, fname, xaxis, sheet_name=0, df=None, fmt=None):
         self.xaxis = xaxis
         self.fname = fname
         self.sheet_name = sheet_name
@@ -332,6 +406,10 @@ class WaveFile():
         self._df = df
         self._columns = None
         self._virtual = df is not None
+        self.fmt = fmt
+        self._remote = (not self._virtual) and _is_url(fname)
+        self._remote_bytes = None
+        self._remote_content_type = None
         if self._virtual and df is not None:
             #- In-memory frames (pivot / session) skip global ``--twos-complement``
             #- so we do not re-decode already-processed floats. Use pivot
@@ -364,6 +442,16 @@ class WaveFile():
         if self._virtual:
             return
 
+        if self._remote:
+            #- Remote sources are fetched once and treated as a static
+            #- snapshot: there's no cheap mtime check over HTTP, and
+            #- re-fetching on every GUI refresh would be surprising
+            #- (slow, and could hammer rate-limited APIs). Re-open the
+            #- URL (or restart cicwave) to get a fresh copy.
+            if self._df is None and self._remote_bytes is None:
+                self._read_header_or_full()
+            return
+
         if self.modified is None:
             self._read_header_or_full()
             self.modified = os.path.getmtime(self.fname)
@@ -384,6 +472,10 @@ class WaveFile():
     def _read_header_or_full(self):
         """Populate ``self._columns`` cheaply if possible; otherwise fall back
         to a full read (which also fills ``self._df``)."""
+        if self._remote:
+            self._df = self._read_file()
+            self._columns = list(self._df.columns)
+            return
         ext = os.path.splitext(self.fname)[1].lower()
         if ext in self._HEADER_ONLY_EXTS:
             try:
@@ -465,6 +557,8 @@ class WaveFile():
     }
 
     def _read_file(self):
+        if self._remote:
+            return self._apply_twos_decode_df(self._read_remote_file())
         ext = os.path.splitext(self.fname)[1].lower()
         reader = self.PANDAS_READERS.get(ext)
         if reader:
@@ -472,6 +566,83 @@ class WaveFile():
         else:
             df = _ngraw_toDataFrame(self.fname)
         return self._apply_twos_decode_df(df)
+
+    def _remote_ext(self):
+        """Resolve the format to use for a URL source.
+
+        Priority: explicit ``--format`` override, then the URL path's own
+        extension (query string ignored), then the response's
+        Content-Type header. Returns ``''`` if none of those resolve.
+        """
+        if self.fmt:
+            f = self.fmt.lower().lstrip('.')
+            return '.' + f
+        path = urllib.parse.urlsplit(self.fname).path
+        ext = os.path.splitext(path)[1].lower()
+        if ext:
+            return ext
+        return _CONTENT_TYPE_EXT.get(self._remote_content_type or '', '')
+
+    def _read_remote_file(self):
+        if self._remote_bytes is None:
+            self._remote_bytes, self._remote_content_type = _fetch_url(self.fname)
+
+        ext = self._remote_ext()
+        if ext in self._REMOTE_BLOCKED_EXTS:
+            raise ValueError(
+                "refusing to load %s over a URL (arbitrary deserialization "
+                "risk) - download it locally first if you trust the source"
+                % ext)
+        if ext in self._REMOTE_UNSUPPORTED_EXTS:
+            raise ValueError(
+                "%s is not supported for URL sources yet - download the "
+                "file locally first" % ext)
+        if not ext:
+            raise ValueError(
+                "could not determine a file format for %s; pass --format "
+                "(e.g. --format csv or --format json)" % self.fname)
+
+        if ext == '.csv':
+            return self._parse_remote_csv(self._sniff_csv_sep(default=','))
+        if ext in ('.tsv', '.txt'):
+            return self._parse_remote_csv('\t')
+        if ext == '.json':
+            return pd.read_json(_io.BytesIO(self._remote_bytes))
+        if ext in ('.xlsx', '.xls', '.ods'):
+            df = pd.read_excel(_io.BytesIO(self._remote_bytes),
+                               sheet_name=self.sheet_name)
+            df.columns = [c.strip() for c in df.columns]
+            return df
+        if ext == '.parquet':
+            return pd.read_parquet(_io.BytesIO(self._remote_bytes))
+        if ext == '.feather':
+            return pd.read_feather(_io.BytesIO(self._remote_bytes))
+        if ext == '.html':
+            return pd.read_html(_io.BytesIO(self._remote_bytes))[0]
+        if ext == '.xml':
+            return pd.read_xml(_io.BytesIO(self._remote_bytes))
+        if ext == '.fwf':
+            return pd.read_fwf(_io.BytesIO(self._remote_bytes))
+        raise ValueError("unsupported format %r for URL sources" % ext)
+
+    def _parse_remote_csv(self, sep):
+        comment = self._effective_comment(default=None)
+        text = self._remote_bytes.decode('utf-8', errors='replace')
+        if comment and len(comment) > 1:
+            text = '\n'.join(
+                ln for ln in text.splitlines()
+                if not ln.lstrip().startswith(comment))
+            df = pd.read_csv(_io.StringIO(text), sep=sep)
+            df.columns = [c.strip() for c in df.columns]
+            return df
+        c_kw = {'comment': comment} if comment else {}
+        try:
+            df = pd.read_csv(_io.StringIO(text), sep=sep, engine='c', **c_kw)
+        except Exception:
+            df = pd.read_csv(_io.StringIO(text), sep=None,
+                             engine='python', **c_kw)
+        df.columns = [c.strip() for c in df.columns]
+        return df
 
     # Candidate delimiters for CSV auto-detection. Order is the tie-break
     # preference (',' wins over ';' when counts are equal).
@@ -584,12 +755,19 @@ class WaveFile():
         """
         if self.csv_sep_override:
             return self.csv_sep_override
-        try:
-            with open(self.fname, 'r', encoding='utf-8',
-                      errors='replace', newline='') as f:
-                sample = f.read(8192)
-        except OSError:
-            return default
+        if self._remote:
+            if self._remote_bytes is None:
+                self._remote_bytes, self._remote_content_type = \
+                    _fetch_url(self.fname)
+            sample = self._remote_bytes[:8192].decode(
+                'utf-8', errors='replace')
+        else:
+            try:
+                with open(self.fname, 'r', encoding='utf-8',
+                          errors='replace', newline='') as f:
+                    sample = f.read(8192)
+            except OSError:
+                return default
         if not sample:
             return default
 
@@ -786,9 +964,9 @@ class WaveFiles(dict):
         self.current = None
         pass
 
-    def open(self,fname,xaxis,sheet_name=0):
+    def open(self,fname,xaxis,sheet_name=0,fmt=None):
         key = fname if sheet_name == 0 else "%s::%s" % (fname, sheet_name)
-        self[key] = WaveFile(fname,xaxis,sheet_name)
+        self[key] = WaveFile(fname,xaxis,sheet_name,fmt=fmt)
         self.current = key
         return self[key]
 

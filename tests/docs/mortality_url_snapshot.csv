@@ -1,0 +1,704 @@
+location,year,p_scores_all_ages
+France,2020.011,-5.27
+France,2020.03,-2.68
+France,2020.049,-4.63
+France,2020.068,-5.66
+France,2020.088,-4.06
+France,2020.107,-5.93
+France,2020.126,-5.86
+France,2020.145,-8.21
+France,2020.164,-6.81
+France,2020.183,-3.84
+France,2020.203,4.3
+France,2020.222,18.68
+France,2020.241,39.04
+France,2020.26,65.24
+France,2020.279,57.18
+France,2020.298,39.61
+France,2020.318,17.44
+France,2020.337,4.48
+France,2020.356,3.67
+France,2020.375,2.11
+France,2020.394,5.56
+France,2020.413,1.64
+France,2020.433,1.81
+France,2020.452,2.64
+France,2020.471,0.59
+France,2020.49,6.98
+France,2020.509,-6.76
+France,2020.528,0.95
+France,2020.548,-3.02
+France,2020.567,1.01
+France,2020.586,6.98
+France,2020.605,4.77
+France,2020.624,17.4
+France,2020.643,1.88
+France,2020.663,2.15
+France,2020.682,5.4
+France,2020.701,8.14
+France,2020.72,10.99
+France,2020.739,2.25
+France,2020.758,9.03
+France,2020.778,6.22
+France,2020.797,10.49
+France,2020.816,22.69
+France,2020.835,30.78
+France,2020.854,38.26
+France,2020.873,36.85
+France,2020.893,31.26
+France,2020.912,27.24
+France,2020.931,24.51
+France,2020.95,21.25
+France,2020.969,14.63
+France,2020.988,9.37
+France,2021.005,13.84
+France,2021.025,9.17
+France,2021.044,7.93
+France,2021.063,14.69
+France,2021.082,13.12
+France,2021.101,10.45
+France,2021.12,7.37
+France,2021.14,8.52
+France,2021.159,3.34
+France,2021.178,0.34
+France,2021.197,1.41
+France,2021.216,7.73
+France,2021.235,8.83
+France,2021.255,13.73
+France,2021.274,14.26
+France,2021.293,17.12
+France,2021.312,19.91
+France,2021.331,16.78
+France,2021.35,16.03
+France,2021.37,8.15
+France,2021.389,6.76
+France,2021.408,4.99
+France,2021.427,5.4
+France,2021.446,4.62
+France,2021.465,7.6
+France,2021.485,-4.85
+France,2021.504,-2.41
+France,2021.523,-2.33
+France,2021.542,1.11
+France,2021.561,10.13
+France,2021.58,2.29
+France,2021.6,3.83
+France,2021.619,12.92
+France,2021.638,11.97
+France,2021.657,6.13
+France,2021.676,11.58
+France,2021.695,16.43
+France,2021.715,5.74
+France,2021.734,2.83
+France,2021.753,6.45
+France,2021.772,4.93
+France,2021.791,8.29
+France,2021.81,8.84
+France,2021.83,9.84
+France,2021.849,4.56
+France,2021.868,7.5
+France,2021.887,8.49
+France,2021.906,12.55
+France,2021.925,16.98
+France,2021.945,19.82
+France,2021.964,16.26
+France,2021.983,18.65
+France,2022.003,16.79
+France,2022.022,8.36
+France,2022.041,7.26
+France,2022.06,9.49
+France,2022.079,15.39
+France,2022.099,15.62
+France,2022.118,8.49
+France,2022.137,5.31
+France,2022.156,-1.13
+France,2022.175,-1.02
+France,2022.194,-0.38
+France,2022.214,2.91
+France,2022.233,5.82
+France,2022.252,10.34
+France,2022.271,15.02
+France,2022.29,18.38
+France,2022.309,15.32
+France,2022.329,11.02
+France,2022.348,11.84
+France,2022.367,8.4
+France,2022.386,7.24
+France,2022.405,-1.38
+France,2022.424,7.74
+France,2022.444,3.68
+France,2022.463,12.56
+France,2022.482,6.11
+France,2022.501,0.89
+France,2022.52,6.85
+France,2022.539,22.48
+France,2022.559,25.03
+France,2022.578,11.84
+France,2022.597,17.37
+France,2022.616,17.82
+France,2022.635,13.1
+France,2022.654,8.32
+France,2022.674,7.87
+France,2022.693,7.48
+France,2022.712,5.13
+France,2022.731,8.65
+France,2022.75,13.68
+France,2022.769,14.4
+France,2022.789,11.41
+France,2022.808,14.19
+France,2022.827,8.3
+France,2022.846,4.75
+France,2022.865,7.39
+France,2022.884,13.47
+France,2022.903,14.12
+France,2022.923,15.16
+France,2022.942,25.85
+France,2022.961,31.14
+France,2022.98,37.35
+France,2023.0,30.8
+France,2023.019,15.14
+France,2023.038,4.24
+France,2023.057,2.41
+France,2023.077,1.73
+France,2023.096,-0.51
+France,2023.115,-2.12
+France,2023.134,-2.57
+France,2023.153,-2.94
+France,2023.172,-3.38
+France,2023.192,0.61
+France,2023.211,2.32
+France,2023.23,-0.27
+France,2023.249,-0.27
+France,2023.268,2.27
+France,2023.287,4.98
+France,2023.307,7.96
+France,2023.326,8.2
+France,2023.345,6.19
+France,2023.364,3.02
+France,2023.383,4.79
+France,2023.402,8.66
+France,2023.422,9.37
+France,2023.441,10.7
+France,2023.46,8.12
+France,2023.479,3.56
+France,2023.498,-1.99
+France,2023.517,-1.26
+France,2023.537,4.33
+France,2023.556,0.0
+France,2023.575,1.06
+France,2023.594,0.18
+France,2023.613,7.67
+France,2023.632,11.05
+France,2023.652,11.77
+France,2023.671,7.19
+France,2023.69,13.75
+France,2023.709,6.36
+France,2023.728,0.86
+France,2023.747,5.68
+France,2023.767,4.57
+France,2023.786,4.39
+France,2023.805,8.58
+France,2023.824,12.11
+France,2023.843,10.39
+France,2023.862,9.31
+France,2023.882,8.86
+France,2023.901,8.71
+France,2023.92,13.2
+France,2023.939,18.34
+France,2023.958,13.96
+France,2023.977,11.94
+France,2023.997,11.19
+France,2024.016,7.21
+France,2024.036,4.68
+France,2024.055,9.06
+France,2024.074,8.36
+France,2024.093,3.61
+France,2024.112,0.43
+France,2024.131,-1.34
+France,2024.151,-3.15
+France,2024.17,-4.48
+France,2024.189,-2.56
+France,2024.208,1.56
+France,2024.227,-1.59
+France,2024.246,0.51
+France,2024.266,1.53
+France,2024.285,3.8
+France,2024.304,0.36
+France,2024.323,6.65
+France,2024.342,6.39
+France,2024.361,5.23
+France,2024.381,3.44
+France,2024.4,3.49
+France,2024.419,2.82
+France,2024.438,5.95
+Germany,2020.011,-1.78
+Germany,2020.03,-0.71
+Germany,2020.049,-3.02
+Germany,2020.068,-4.73
+Germany,2020.088,-3.28
+Germany,2020.107,-6.91
+Germany,2020.126,-6.41
+Germany,2020.145,-11.63
+Germany,2020.164,-11.16
+Germany,2020.183,-8.29
+Germany,2020.203,-3.26
+Germany,2020.222,0.35
+Germany,2020.241,3.65
+Germany,2020.26,11.51
+Germany,2020.279,14.26
+Germany,2020.298,9.93
+Germany,2020.318,6.23
+Germany,2020.337,5.38
+Germany,2020.356,2.16
+Germany,2020.375,0.94
+Germany,2020.394,3.82
+Germany,2020.413,0.57
+Germany,2020.433,4.46
+Germany,2020.452,3.57
+Germany,2020.471,0.21
+Germany,2020.49,4.92
+Germany,2020.509,-3.28
+Germany,2020.528,-1.0
+Germany,2020.548,-1.07
+Germany,2020.567,-2.34
+Germany,2020.586,2.83
+Germany,2020.605,5.32
+Germany,2020.624,20.08
+Germany,2020.643,8.21
+Germany,2020.663,1.66
+Germany,2020.682,5.12
+Germany,2020.701,5.81
+Germany,2020.72,7.97
+Germany,2020.739,6.22
+Germany,2020.758,6.15
+Germany,2020.778,1.36
+Germany,2020.797,3.4
+Germany,2020.816,8.17
+Germany,2020.835,8.65
+Germany,2020.854,8.44
+Germany,2020.873,12.23
+Germany,2020.893,13.69
+Germany,2020.912,19.02
+Germany,2020.931,23.41
+Germany,2020.95,31.18
+Germany,2020.969,32.45
+Germany,2020.988,39.29
+Germany,2021.005,39.22
+Germany,2021.025,29.62
+Germany,2021.044,25.51
+Germany,2021.063,23.47
+Germany,2021.082,14.73
+Germany,2021.101,6.5
+Germany,2021.12,2.42
+Germany,2021.14,-2.38
+Germany,2021.159,-11.51
+Germany,2021.178,-15.94
+Germany,2021.197,-13.24
+Germany,2021.216,-10.45
+Germany,2021.235,-6.19
+Germany,2021.255,-2.45
+Germany,2021.274,1.85
+Germany,2021.293,6.43
+Germany,2021.312,10.05
+Germany,2021.331,11.94
+Germany,2021.35,13.67
+Germany,2021.37,7.53
+Germany,2021.389,5.75
+Germany,2021.408,4.0
+Germany,2021.427,9.05
+Germany,2021.446,5.55
+Germany,2021.465,19.01
+Germany,2021.485,5.04
+Germany,2021.504,3.22
+Germany,2021.523,-0.13
+Germany,2021.542,8.32
+Germany,2021.561,5.37
+Germany,2021.58,-0.46
+Germany,2021.6,0.4
+Germany,2021.619,5.86
+Germany,2021.638,6.57
+Germany,2021.657,5.69
+Germany,2021.676,5.84
+Germany,2021.695,18.21
+Germany,2021.715,11.37
+Germany,2021.734,11.67
+Germany,2021.753,10.38
+Germany,2021.772,9.74
+Germany,2021.791,9.74
+Germany,2021.81,15.09
+Germany,2021.83,18.64
+Germany,2021.849,19.42
+Germany,2021.868,20.21
+Germany,2021.887,27.12
+Germany,2021.906,31.11
+Germany,2021.925,35.12
+Germany,2021.945,31.2
+Germany,2021.964,25.75
+Germany,2021.983,20.42
+Germany,2022.003,20.87
+Germany,2022.022,8.56
+Germany,2022.041,1.92
+Germany,2022.06,1.55
+Germany,2022.079,2.34
+Germany,2022.099,1.24
+Germany,2022.118,0.21
+Germany,2022.137,0.82
+Germany,2022.156,-5.0
+Germany,2022.175,-5.21
+Germany,2022.194,-0.9
+Germany,2022.214,4.09
+Germany,2022.233,8.05
+Germany,2022.252,10.0
+Germany,2022.271,13.08
+Germany,2022.29,12.87
+Germany,2022.309,11.74
+Germany,2022.329,10.83
+Germany,2022.348,13.06
+Germany,2022.367,11.5
+Germany,2022.386,10.22
+Germany,2022.405,4.23
+Germany,2022.424,8.53
+Germany,2022.444,8.68
+Germany,2022.463,15.4
+Germany,2022.482,16.45
+Germany,2022.501,12.61
+Germany,2022.52,6.69
+Germany,2022.539,16.65
+Germany,2022.559,25.55
+Germany,2022.578,17.38
+Germany,2022.597,17.8
+Germany,2022.616,19.56
+Germany,2022.635,21.37
+Germany,2022.654,17.04
+Germany,2022.674,11.66
+Germany,2022.693,17.57
+Germany,2022.712,12.72
+Germany,2022.731,17.6
+Germany,2022.75,24.22
+Germany,2022.769,24.31
+Germany,2022.789,26.2
+Germany,2022.808,27.07
+Germany,2022.827,24.82
+Germany,2022.846,16.54
+Germany,2022.865,15.18
+Germany,2022.884,18.48
+Germany,2022.903,20.84
+Germany,2022.923,24.43
+Germany,2022.942,31.71
+Germany,2022.961,41.97
+Germany,2022.98,53.65
+Germany,2023.0,48.76
+Germany,2023.019,32.45
+Germany,2023.038,16.2
+Germany,2023.057,8.75
+Germany,2023.077,4.53
+Germany,2023.096,3.13
+Germany,2023.115,0.47
+Germany,2023.134,0.01
+Germany,2023.153,-2.55
+Germany,2023.172,-4.11
+Germany,2023.192,2.29
+Germany,2023.211,6.39
+Germany,2023.23,8.54
+Germany,2023.249,9.19
+Germany,2023.268,7.79
+Germany,2023.287,12.33
+Germany,2023.307,13.35
+Germany,2023.326,10.54
+Germany,2023.345,12.06
+Germany,2023.364,9.37
+Germany,2023.383,9.16
+Germany,2023.402,11.4
+Germany,2023.422,8.1
+Germany,2023.441,11.28
+Germany,2023.46,11.41
+Germany,2023.479,10.58
+Germany,2023.498,3.5
+Germany,2023.517,0.89
+Germany,2023.537,8.91
+Germany,2023.556,0.38
+Germany,2023.575,-1.82
+Germany,2023.594,-0.41
+Germany,2023.613,5.37
+Germany,2023.632,12.64
+Germany,2023.652,11.91
+Germany,2023.671,2.37
+Germany,2023.69,13.65
+Germany,2023.709,10.58
+Germany,2023.728,6.97
+Germany,2023.747,7.59
+Germany,2023.767,9.78
+Germany,2023.786,8.9
+Germany,2023.805,13.52
+Germany,2023.824,18.08
+Germany,2023.843,19.22
+Germany,2023.862,17.65
+Germany,2023.882,18.54
+Germany,2023.901,18.86
+Germany,2023.92,23.23
+Germany,2023.939,25.6
+Germany,2023.958,24.06
+Germany,2023.977,24.11
+Germany,2023.997,20.63
+Germany,2024.016,12.9
+Germany,2024.036,9.18
+Germany,2024.055,11.19
+Germany,2024.074,11.65
+Germany,2024.093,6.89
+Germany,2024.112,8.48
+Germany,2024.131,0.7
+Germany,2024.151,-6.11
+Germany,2024.17,-9.76
+Germany,2024.189,-10.27
+Germany,2024.208,-5.79
+Germany,2024.227,-5.02
+Germany,2024.246,-1.01
+Germany,2024.266,2.46
+Germany,2024.285,1.96
+Germany,2024.304,2.92
+Germany,2024.323,6.03
+Germany,2024.342,10.58
+Germany,2024.361,4.19
+Germany,2024.381,10.06
+Germany,2024.4,5.2
+Germany,2024.419,3.96
+Germany,2024.438,4.68
+Germany,2024.457,10.52
+Germany,2024.476,11.11
+Germany,2024.496,16.75
+Germany,2024.515,2.44
+Germany,2024.534,13.82
+Germany,2024.553,11.33
+United States,2020.011,-0.14
+United States,2020.03,-0.52
+United States,2020.049,-0.93
+United States,2020.068,0.61
+United States,2020.088,1.19
+United States,2020.107,1.84
+United States,2020.126,1.61
+United States,2020.145,2.89
+United States,2020.164,4.21
+United States,2020.183,4.26
+United States,2020.203,4.19
+United States,2020.222,5.83
+United States,2020.241,14.42
+United States,2020.26,31.44
+United States,2020.279,45.08
+United States,2020.298,43.15
+United States,2020.318,39.92
+United States,2020.337,31.3
+United States,2020.356,28.03
+United States,2020.375,24.76
+United States,2020.394,20.28
+United States,2020.413,16.95
+United States,2020.433,14.94
+United States,2020.452,13.66
+United States,2020.471,14.17
+United States,2020.49,15.48
+United States,2020.509,17.41
+United States,2020.528,22.61
+United States,2020.548,25.39
+United States,2020.567,28.3
+United States,2020.586,27.95
+United States,2020.605,26.55
+United States,2020.624,27.22
+United States,2020.643,25.24
+United States,2020.663,21.46
+United States,2020.682,19.18
+United States,2020.701,17.48
+United States,2020.72,17.57
+United States,2020.739,18.71
+United States,2020.758,15.91
+United States,2020.778,18.64
+United States,2020.797,15.84
+United States,2020.816,17.94
+United States,2020.835,19.99
+United States,2020.854,26.56
+United States,2020.873,27.85
+United States,2020.893,32.49
+United States,2020.912,34.86
+United States,2020.931,39.82
+United States,2020.95,45.48
+United States,2020.969,46.6
+United States,2020.988,47.05
+United States,2021.005,51.64
+United States,2021.025,44.53
+United States,2021.044,43.24
+United States,2021.063,39.76
+United States,2021.082,34.75
+United States,2021.101,31.62
+United States,2021.12,22.48
+United States,2021.14,20.09
+United States,2021.159,16.62
+United States,2021.178,11.91
+United States,2021.197,8.08
+United States,2021.216,7.21
+United States,2021.235,8.73
+United States,2021.255,6.59
+United States,2021.274,10.92
+United States,2021.293,8.46
+United States,2021.312,12.26
+United States,2021.331,13.19
+United States,2021.35,11.77
+United States,2021.37,11.95
+United States,2021.389,13.59
+United States,2021.408,11.87
+United States,2021.427,12.54
+United States,2021.446,11.41
+United States,2021.465,12.06
+United States,2021.485,11.91
+United States,2021.504,13.51
+United States,2021.523,12.2
+United States,2021.542,13.22
+United States,2021.561,16.08
+United States,2021.58,20.42
+United States,2021.6,26.91
+United States,2021.619,33.13
+United States,2021.638,39.82
+United States,2021.657,44.37
+United States,2021.676,46.1
+United States,2021.695,45.83
+United States,2021.715,44.3
+United States,2021.734,42.03
+United States,2021.753,39.69
+United States,2021.772,33.88
+United States,2021.791,29.69
+United States,2021.81,28.13
+United States,2021.83,25.98
+United States,2021.849,26.0
+United States,2021.868,26.27
+United States,2021.887,24.29
+United States,2021.906,25.61
+United States,2021.925,29.05
+United States,2021.945,30.26
+United States,2021.964,26.49
+United States,2021.983,27.73
+United States,2022.003,29.63
+United States,2022.022,32.54
+United States,2022.041,39.5
+United States,2022.06,43.11
+United States,2022.079,44.8
+United States,2022.099,39.99
+United States,2022.118,32.35
+United States,2022.137,22.76
+United States,2022.156,15.66
+United States,2022.175,13.39
+United States,2022.194,8.18
+United States,2022.214,7.72
+United States,2022.233,4.8
+United States,2022.252,5.54
+United States,2022.271,5.27
+United States,2022.29,6.17
+United States,2022.309,5.75
+United States,2022.329,8.62
+United States,2022.348,9.03
+United States,2022.367,11.03
+United States,2022.386,11.57
+United States,2022.405,11.51
+United States,2022.424,12.88
+United States,2022.444,13.37
+United States,2022.463,13.23
+United States,2022.482,14.83
+United States,2022.501,14.72
+United States,2022.52,14.29
+United States,2022.539,15.86
+United States,2022.559,18.88
+United States,2022.578,17.53
+United States,2022.597,18.04
+United States,2022.616,16.58
+United States,2022.635,16.99
+United States,2022.654,16.84
+United States,2022.674,15.62
+United States,2022.693,16.27
+United States,2022.712,14.86
+United States,2022.731,15.76
+United States,2022.75,14.81
+United States,2022.769,15.59
+United States,2022.789,14.87
+United States,2022.808,15.01
+United States,2022.827,13.99
+United States,2022.846,15.6
+United States,2022.865,14.48
+United States,2022.884,14.6
+United States,2022.903,19.65
+United States,2022.923,21.17
+United States,2022.942,21.22
+United States,2022.961,17.98
+United States,2022.98,20.31
+United States,2023.0,22.5
+United States,2023.019,14.72
+United States,2023.038,8.93
+United States,2023.057,7.35
+United States,2023.077,6.45
+United States,2023.096,8.15
+United States,2023.115,7.84
+United States,2023.134,6.88
+United States,2023.153,8.6
+United States,2023.172,7.93
+United States,2023.192,6.25
+United States,2023.211,8.55
+United States,2023.23,8.77
+United States,2023.249,9.37
+United States,2023.268,7.51
+United States,2023.287,9.55
+United States,2023.307,9.0
+United States,2023.326,9.51
+United States,2023.345,10.11
+United States,2023.364,10.91
+United States,2023.383,9.69
+United States,2023.402,8.98
+United States,2023.422,11.47
+United States,2023.441,9.99
+United States,2023.46,10.48
+United States,2023.479,10.01
+United States,2023.498,10.18
+United States,2023.517,10.07
+United States,2023.537,10.33
+United States,2023.556,10.92
+United States,2023.575,11.42
+United States,2023.594,11.93
+United States,2023.613,12.76
+United States,2023.632,13.42
+United States,2023.652,13.22
+United States,2023.671,11.95
+United States,2023.69,13.44
+United States,2023.709,11.81
+United States,2023.728,12.24
+United States,2023.747,12.3
+United States,2023.767,12.69
+United States,2023.786,12.31
+United States,2023.805,12.0
+United States,2023.824,11.1
+United States,2023.843,11.76
+United States,2023.862,13.11
+United States,2023.882,11.18
+United States,2023.901,9.96
+United States,2023.92,14.27
+United States,2023.939,14.64
+United States,2023.958,11.6
+United States,2023.977,14.06
+United States,2023.997,13.96
+United States,2024.016,11.3
+United States,2024.036,11.77
+United States,2024.055,11.55
+United States,2024.074,12.45
+United States,2024.093,7.94
+United States,2024.112,6.54
+United States,2024.131,5.48
+United States,2024.151,7.72
+United States,2024.17,6.65
+United States,2024.189,5.24
+United States,2024.208,6.16
+United States,2024.227,4.3
+United States,2024.246,6.46
+United States,2024.266,6.52
+United States,2024.285,7.87
+United States,2024.304,7.25
+United States,2024.323,7.91
+United States,2024.342,7.38
+United States,2024.361,8.08
+United States,2024.381,8.19
+United States,2024.4,8.74
+United States,2024.419,7.27
+United States,2024.438,8.26
+United States,2024.457,6.99

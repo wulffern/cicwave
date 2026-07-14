@@ -27,7 +27,7 @@ from PySide6.QtGui import (QKeySequence, QFont, QFontDatabase, QShortcut,
 
 import pyqtgraph as pg
 
-from .wavefiles import WaveFile, WaveFiles, parse_unit_from_name
+from .wavefiles import WaveFile, WaveFiles, parse_unit_from_name, _is_url
 from . import analysis as wave_analysis
 from .theme import THEMES, _get_theme, _set_active_theme
 from matplotlib.ticker import EngFormatter
@@ -782,9 +782,9 @@ class PgWaveBrowser(QWidget):
     def plotStyle(self):
         return self.style_cb.currentText()
 
-    def openFile(self, fname, sheet_name=None):
+    def openFile(self, fname, sheet_name=None, fmt=None):
         sheet = sheet_name if sheet_name is not None else 0
-        f = self.files.open(fname, self.xaxis, sheet_name=sheet)
+        f = self.files.open(fname, self.xaxis, sheet_name=sheet, fmt=fmt)
         key = self.files.current
         item = QTreeWidgetItem([f.name])
         item.setData(0, Qt.UserRole, key)
@@ -3766,7 +3766,7 @@ class PgWaveWindow(QMainWindow):
         for fkey, wf in self.browser.files.items():
             idx = len(files)
             orig = getattr(wf, '_original_path', None) or wf.fname
-            entry = {'path': os.path.abspath(orig)}
+            entry = {'path': orig if _is_url(orig) else os.path.abspath(orig)}
             pivot_path = getattr(wf, '_pivot_spec_path', None)
             if pivot_path:
                 entry['pivot'] = pivot_path
@@ -3814,7 +3814,8 @@ class PgWaveWindow(QMainWindow):
         session = self._build_session()
         session_dir = os.path.dirname(os.path.abspath(fname))
         for fe in session.get('files', []):
-            fe['path'] = os.path.relpath(fe['path'], session_dir)
+            if not _is_url(fe['path']):
+                fe['path'] = os.path.relpath(fe['path'], session_dir)
             if 'pivot' in fe:
                 fe['pivot'] = os.path.relpath(fe['pivot'], session_dir)
 
@@ -3839,7 +3840,7 @@ class PgWaveWindow(QMainWindow):
 
         for fe in session.get('files', []):
             fpath = fe['path']
-            if not os.path.isabs(fpath):
+            if not _is_url(fpath) and not os.path.isabs(fpath):
                 fpath = os.path.normpath(os.path.join(session_dir, fpath))
             pivot_path = fe.get('pivot')
             if pivot_path and not os.path.isabs(pivot_path):
@@ -4457,8 +4458,8 @@ class PgWaveWindow(QMainWindow):
             p.set_metrics_banner(banner.strip())
             p._update_readout()
 
-    def openFile(self, fname, sheet_name=None):
-        self.browser.openFile(fname, sheet_name=sheet_name)
+    def openFile(self, fname, sheet_name=None, fmt=None):
+        self.browser.openFile(fname, sheet_name=sheet_name, fmt=fmt)
 
     def openDataFrame(self, df, name, **kwargs):
         self.browser.openDataFrame(df, name, **kwargs)
@@ -4531,8 +4532,8 @@ class CmdWavePg:
         self.xaxis = effective if effective else None
         self.win = PgWaveWindow(self.xaxis)
 
-    def openFile(self, fname, sheet_name=None):
-        self.win.openFile(fname, sheet_name=sheet_name)
+    def openFile(self, fname, sheet_name=None, fmt=None):
+        self.win.openFile(fname, sheet_name=sheet_name, fmt=fmt)
 
     def openDataFrame(self, df, name, **kwargs):
         self.win.openDataFrame(df, name, **kwargs)

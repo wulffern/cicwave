@@ -109,6 +109,13 @@ class TestPositionalGlobExpansion(unittest.TestCase):
         out = _expand_glob_patterns((pat,), ())
         self.assertEqual(out, ())
 
+    def test_url_with_query_string_not_treated_as_glob(self):
+        # A REST URL's query string contains '?' / '&', which look like
+        # glob metacharacters; URLs must bypass glob expansion entirely.
+        url = "https://example.com/data.csv?format=csv&x=1"
+        out = _expand_glob_patterns((url,), ())
+        self.assertEqual(out, (url,))
+
 
 if __name__ == "__main__":
     unittest.main()

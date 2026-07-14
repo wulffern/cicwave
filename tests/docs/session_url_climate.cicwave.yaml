@@ -1,0 +1,18 @@
+files:
+  - path: climate_url_snapshot.csv
+    pivot: pivot_spec_climate.yaml
+plots:
+  - name: CO2 emissions
+    title: CO2 emissions (annual, million tonnes)
+    xlabel: Year
+    ylabel: CO2 (Mt)
+    waves:
+      - file: 0
+        name: "Norway"
+        style: Lines
+      - file: 0
+        name: "Germany"
+        style: Lines
+      - file: 0
+        name: "United States"
+        style: Lines
