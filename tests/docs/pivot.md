@@ -59,50 +59,16 @@ or a `KEY=VAL;KEY=VAL` string, are auto-shortened for wave names. Use
 Given a CSV with amplifier gain and phase measured across frequency at
 three temperatures (`tests/docs/pivot_data.csv`), and a pivot spec:
 
-pivot_spec.yaml:
-```yaml
-index: Parameter
-columns: Frequency
-values: Measurement
-conditions:
-  - Temp
-
-```
-
+<!--cat:
+file: pivot_spec.yaml
+language: yaml
+-->
 
 The `--pivot-info` flag shows the dimensions:
 
-```bash
-cicwave pivot_data.csv --pivot pivot_spec.yaml --pivot-info
-```
-
-```bash
---- pivot_data.csv ---
-available columns: Frequency, Measurement, Parameter, Temp
-
-index: Parameter (2 unique)
-  Gain
-  Phase
-
-columns: Frequency (5 unique)
-  1000
-  10000
-  100000
-  1000000
-  10000000
-
-values: Measurement
-
-conditions:
-
-  Temp (3 unique)
-    -40
-    125
-    27
-
-
-```
-
+<!--run_output:
+run: cicwave pivot_data.csv --pivot pivot_spec.yaml --pivot-info
+-->
 
 Then plot the pivoted data — see [Examples](/cicwave/examples#pivoted-data)
 for the resulting plot:

@@ -3,7 +3,7 @@
 PYTHON ?= python3
 PACKAGE_NAME = cicwave
 
-.PHONY: help install test build upload clean dev-install check version
+.PHONY: help install test build upload clean dev-install check version docs
 
 help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -16,6 +16,9 @@ dev-install: ## Install package in development mode
 
 test: ## Run unit tests
 	$(PYTHON) -m unittest discover -s tests/unittests/ -p 'test_*.py' -v
+
+docs: ## Regenerate docs/ (runs cicwave against sample data for the example plots)
+	cd tests/docs && $(MAKE) docs PYTHON=$(PYTHON)
 
 lint: ## Run linting checks
 	@if command -v ruff >/dev/null 2>&1; then \
