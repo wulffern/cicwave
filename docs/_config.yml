@@ -1,0 +1,40 @@
+# Site settings
+title: cicwave
+author:
+  name: Carsten Wulff
+  email: carsten@wulff.no
+
+description: >- # this means to ignore newlines until "baseurl:"
+        Advanced waveform viewer with a PyQtGraph backend, for analog and mixed-signal simulation results.
+
+domain: "wulffern.github.io"
+baseurl: "/cicwave" # the subpath of your site, e.g. /blog
+url: "https://wulffern.github.io" # the base hostname & protocol for your site
+
+# Build settings
+show_excerpts: false
+
+minima:
+  skin: classic
+  social_links:
+    - { platform: github,  user_url: "https://github.com/wulffern/cicwave" }
+    - { platform: youtube, user_url: "https://www.youtube.com/@analogicus" }
+
+# Build settings
+markdown: kramdown
+
+kramdown:
+  mathjax: true
+
+remote_theme: wulffern/minima
+plugins:
+  - jekyll-feed
+  - jemoji
+  - jekyll-seo-tag
+  - jekyll-remote-theme
+
+# Exclude from processing.
+exclude:
+   - Gemfile
+   - Gemfile.lock
+   - node_modules
