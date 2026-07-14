@@ -9,65 +9,9 @@ math: true
 
 ## Command
 
-```bash
-cicwave --help
-```
-
-```bash
-Usage: cicwave [OPTIONS] [FILES]...
-
-  cicwave: Advanced waveform viewer with PyQtGraph backend.
-
-  A high-performance waveform viewer focused on PyQtGraph and Qt6 for advanced
-  visualization of simulation data.
-
-  Supports: .raw, .csv, .tsv, .xlsx, .json, .parquet, .feather, .npz, .h5,
-  .pkl, .vcd (digital), .iqvsa (LitePoint), and more.
-
-  Pivot:
-    --pivot spec.yaml     Reshape data using pivot spec before viewing
-    --pivot-info          Print unique values per pivot dimension and exit
-
-  Session:
-    --session plot.cicwave.yaml         Load saved session
-    --export plot.pdf                   Export to file and exit (no GUI)
-    --session s.yaml --export out.pdf   Restore session and export
-
-  Globs:
-    --glob 'data/*.csv'             Repeatable, supports ** for recursion
-    --glob '**/*.raw'               Useful on PowerShell which doesn't
-                                     auto-expand patterns
-
-Options:
-  --glob TEXT                  Glob pattern (repeatable). Supports ** for
-                               recursion. Useful on shells like PowerShell
-                               that don't auto-expand.
-  --x TEXT                     X-axis column; else CICWAVE_X; else saved
-                               default; else auto
-  --sheet TEXT                 Sheet name for Excel files (default: first
-                               sheet)
-  --pivot TEXT                 Pivot spec file (YAML/JSON)
-  --pivot-info                 Print pivot dimensions and exit
-  --session TEXT               Load session file (.cicwave.yaml)
-  --export TEXT                Export plot to file (PDF/PNG/SVG) and exit
-  --csv-sep SEP                Override CSV delimiter for all .csv files in
-                               this run (e.g. ';', '|', 'tab'). Disables auto-
-                               sniffing.
-  --csv-comment STR            Strip lines starting with STR from text data
-                               files (e.g. '#', '*', '//'). Pass '' to
-                               disable. Default: '#' for .dat/.spe/.cou/.chi;
-                               off for .csv/.tsv.
-  --twos-complement W          Decode integer columns as W-bit 2's complement
-                               after load.
-  --twos-complement-cols LIST  Comma-separated column names for --twos-
-                               complement (default: all except time/frequency
-                               sweep columns).
-  --color / --no-color         Enable/Disable color output
-  --debug                      Enable debug logging
-  --help                       Show this message and exit.
-
-```
-
+<!--run_output:
+run: cicwave --help
+-->
 
 See the full option list on the [home page](/cicwave/).
 

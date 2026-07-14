@@ -116,3 +116,8 @@ dmypy.json
 # OS
 .DS_Store
 Thumbs.db
+
+# docs build byproducts (tests/docs/*.svg); docs/assets/*.svg are tracked
+# explicitly with `git add -f`
+*.svg
+docs/_site/
