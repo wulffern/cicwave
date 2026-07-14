@@ -1,6 +1,10 @@
 # cicwave
 
+[![docs](https://github.com/wulffern/cicwave/actions/workflows/docs.yml/badge.svg)](https://github.com/wulffern/cicwave/actions/workflows/docs.yml)
+
 Waveform viewer with PyQtGraph backend for high-performance visualization of simulation data.
+
+Full documentation: <https://wulffern.github.io/cicwave/>
 
 cicwave is a standalone package extracted from
 [cicsim](https://github.com/wulffern/cicsim), focused on providing the 
