@@ -1,0 +1,16 @@
+files:
+  - path: test.csv
+plots:
+  - name: Annotated
+    title: Comparator inputs with annotation
+    waves:
+      - file: 0
+        name: "v(vp)"
+        style: Lines
+      - file: 0
+        name: "v(vn)"
+        style: Lines
+    annotations:
+      - text: "crossing"
+        x: 5.0e-7
+        y: 0.9

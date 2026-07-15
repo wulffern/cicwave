@@ -24,6 +24,11 @@ Usage: cicwave [OPTIONS] [FILES]...
   Supports: .raw, .csv, .tsv, .xlsx, .json, .parquet, .feather, .npz, .h5,
   .pkl, .vcd (digital), .iqvsa (LitePoint), and more.
 
+  URL sources:
+    cicwave https://example.com/data.csv    Any http(s) URL works directly
+    --format json                           Force format for extension-less
+                                             REST endpoints
+
   Pivot:
     --pivot spec.yaml     Reshape data using pivot spec before viewing
     --pivot-info          Print unique values per pivot dimension and exit
@@ -39,32 +44,37 @@ Usage: cicwave [OPTIONS] [FILES]...
                                      auto-expand patterns
 
 Options:
-  --glob TEXT                  Glob pattern (repeatable). Supports ** for
-                               recursion. Useful on shells like PowerShell
-                               that don't auto-expand.
-  --x TEXT                     X-axis column; else CICWAVE_X; else saved
-                               default; else auto
-  --sheet TEXT                 Sheet name for Excel files (default: first
-                               sheet)
-  --pivot TEXT                 Pivot spec file (YAML/JSON)
-  --pivot-info                 Print pivot dimensions and exit
-  --session TEXT               Load session file (.cicwave.yaml)
-  --export TEXT                Export plot to file (PDF/PNG/SVG) and exit
-  --csv-sep SEP                Override CSV delimiter for all .csv files in
-                               this run (e.g. ';', '|', 'tab'). Disables auto-
-                               sniffing.
-  --csv-comment STR            Strip lines starting with STR from text data
-                               files (e.g. '#', '*', '//'). Pass '' to
-                               disable. Default: '#' for .dat/.spe/.cou/.chi;
-                               off for .csv/.tsv.
-  --twos-complement W          Decode integer columns as W-bit 2's complement
-                               after load.
-  --twos-complement-cols LIST  Comma-separated column names for --twos-
-                               complement (default: all except time/frequency
-                               sweep columns).
-  --color / --no-color         Enable/Disable color output
-  --debug                      Enable debug logging
-  --help                       Show this message and exit.
+  --glob TEXT                     Glob pattern (repeatable). Supports ** for
+                                  recursion. Useful on shells like PowerShell
+                                  that don't auto-expand.
+  --x TEXT                        X-axis column; else CICWAVE_X; else saved
+                                  default; else auto
+  --sheet TEXT                    Sheet name for Excel files (default: first
+                                  sheet)
+  --format [csv|tsv|json|xlsx|xls|ods|parquet|feather|html|xml|fwf]
+                                  Force the data format for a URL source (e.g.
+                                  a REST API endpoint with no file extension).
+                                  Ignored for local files, which are always
+                                  dispatched by extension.
+  --pivot TEXT                    Pivot spec file (YAML/JSON)
+  --pivot-info                    Print pivot dimensions and exit
+  --session TEXT                  Load session file (.cicwave.yaml)
+  --export TEXT                   Export plot to file (PDF/PNG/SVG) and exit
+  --csv-sep SEP                   Override CSV delimiter for all .csv files in
+                                  this run (e.g. ';', '|', 'tab'). Disables
+                                  auto-sniffing.
+  --csv-comment STR               Strip lines starting with STR from text data
+                                  files (e.g. '#', '*', '//'). Pass '' to
+                                  disable. Default: '#' for
+                                  .dat/.spe/.cou/.chi; off for .csv/.tsv.
+  --twos-complement W             Decode integer columns as W-bit 2's
+                                  complement after load.
+  --twos-complement-cols LIST     Comma-separated column names for --twos-
+                                  complement (default: all except
+                                  time/frequency sweep columns).
+  --color / --no-color            Enable/Disable color output
+  --debug                         Enable debug logging
+  --help                          Show this message and exit.
 
 ```
 
@@ -73,10 +83,10 @@ See the full option list on the [home page](/cicwave/).
 
 ## Description
 
-`cicwave` opens an interactive waveform viewer for one or more data files.
-Files are dispatched by extension; anything unrecognised falls through to
-the ngspice `.raw` reader, so non-standard suffixes on ngspice output
-(`.raw0`, `.bin`, ...) usually still work.
+`cicwave` opens an interactive waveform viewer for one or more data files,
+local or remote. Files are dispatched by extension; anything unrecognised
+falls through to the ngspice `.raw` reader, so non-standard suffixes on
+ngspice output (`.raw0`, `.bin`, ...) usually still work.
 
 ## Basic usage
 
@@ -112,6 +122,24 @@ cicwave data.csv --x time
 
 If `--x` is omitted, `cicwave` falls back to the `CICWAVE_X` environment
 variable, then a saved default, then auto-detection.
+
+## URL sources
+
+Any `http://`/`https://` URL works wherever a local path does:
+
+```bash
+cicwave https://raw.githubusercontent.com/owid/co2-data/master/owid-co2-data.csv
+```
+
+For a REST endpoint with no file extension, force the format with
+`--format`:
+
+```bash
+cicwave https://api.example.com/v1/measurements --format json
+```
+
+See [URL sources](/cicwave/url-sources) for the full reference
+(supported formats, fetch behavior, security notes).
 
 ## CSV options
 

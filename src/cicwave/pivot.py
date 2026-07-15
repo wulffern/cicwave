@@ -39,8 +39,11 @@ Use ``--pivot-info`` to discover the cN keys for each condition column.
 """
 
 import json
+import logging
 import yaml
 import pandas as pd
+
+logger = logging.getLogger("cicwave")
 
 
 def load_spec(path):
@@ -228,6 +231,21 @@ def apply_pivot(df, spec):
             lambda v: amap.get(v, _shorten_value(v)))
         wave_col = wave_col + '_' + _condition_prefix(cond) + labels.astype(str)
     sub['_wave'] = wave_col
+
+    #- pivot_table below uses aggfunc='mean', which silently averages
+    #- together any rows that land in the same (wave, x) cell. That's
+    #- correct when it's intentional (e.g. Monte-Carlo repeats), but
+    #- usually means the spec is missing a `conditions` column that
+    #- actually varies. Warn so an under-specified spec doesn't look
+    #- like clean data.
+    dedup_cols = ['_wave', columns_col] if has_xaxis else ['_wave']
+    n_dupes = int(sub.duplicated(subset=dedup_cols).sum())
+    if n_dupes:
+        logger.warning(
+            "pivot: %d row(s) share the same wave%s and were averaged "
+            "together (aggfunc='mean'); add a 'conditions' column if "
+            "that wasn't intended",
+            n_dupes, " and x-value" if has_xaxis else "")
 
     if has_xaxis:
         result = sub.pivot_table(

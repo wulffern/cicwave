@@ -6,6 +6,7 @@ Waveform viewer using PySide6 + pyqtgraph.
 Install:  pip install PySide6 pyqtgraph
 """
 
+import math
 import os
 import sys
 import re
@@ -27,7 +28,7 @@ from PySide6.QtGui import (QKeySequence, QFont, QFontDatabase, QShortcut,
 
 import pyqtgraph as pg
 
-from .wavefiles import WaveFile, WaveFiles, parse_unit_from_name
+from .wavefiles import WaveFile, WaveFiles, parse_unit_from_name, _is_url
 from . import analysis as wave_analysis
 from .theme import THEMES, _get_theme, _set_active_theme
 from matplotlib.ticker import EngFormatter
@@ -782,9 +783,9 @@ class PgWaveBrowser(QWidget):
     def plotStyle(self):
         return self.style_cb.currentText()
 
-    def openFile(self, fname, sheet_name=None):
+    def openFile(self, fname, sheet_name=None, fmt=None):
         sheet = sheet_name if sheet_name is not None else 0
-        f = self.files.open(fname, self.xaxis, sheet_name=sheet)
+        f = self.files.open(fname, self.xaxis, sheet_name=sheet, fmt=fmt)
         key = self.files.current
         item = QTreeWidgetItem([f.name])
         item.setData(0, Qt.UserRole, key)
@@ -2100,7 +2101,16 @@ class PgWavePlot(QWidget):
         try:
             xr = self.plot.vb.viewRange()[0]
             yr = self.plot.vb.viewRange()[1]
-            ax.set_xlim(xr[0], xr[1])
+            #- In log-x mode, pyqtgraph's ViewBox reports the range in
+            #- log10 space (it pre-transforms data before plotting rather
+            #- than using a "true" log axis); matplotlib's set_xlim wants
+            #- real data values, so undo that transform first. Without
+            #- this, an exported log-x plot (e.g. a frequency sweep) gets
+            #- an x-range of ~[5, 8] instead of [1e5, 1e8] and renders
+            #- blank.
+            x0 = self._view_to_data_x(xr[0])
+            x1 = self._view_to_data_x(xr[1])
+            ax.set_xlim(x0, x1)
             ax.set_ylim(yr[0], yr[1])
         except Exception:
             pass
@@ -3280,10 +3290,14 @@ class PgWaveWindow(QMainWindow):
             return
         event.acceptProposedAction()
         for path in paths:
-            if path.lower().endswith('.cicwave.yaml'):
-                self.applySession(path)
-            else:
-                self.browser.openFile(path)
+            try:
+                if path.lower().endswith('.cicwave.yaml'):
+                    self.applySession(path)
+                else:
+                    self.browser.openFile(path)
+            except Exception as e:
+                QMessageBox.critical(
+                    self, "Open File", "Failed to load %s:\n%s" % (path, e))
 
     def _setup_menus(self):
         mb = self.menuBar()
@@ -3499,7 +3513,11 @@ class PgWaveWindow(QMainWindow):
             self, "Open File", os.getcwd(),
             "All Supported (*.raw *.vcd *.csv *.tsv *.txt *.xlsx *.xls *.ods *.pkl *.pickle *.json *.parquet *.feather *.npz *.h5 *.hdf5);;Raw Files (*.raw);;VCD Files (*.vcd);;CSV/TSV (*.csv *.tsv *.txt);;Excel (*.xlsx *.xls *.ods);;Pickle (*.pkl *.pickle);;JSON (*.json);;Parquet (*.parquet);;Feather (*.feather);;NumPy (*.npz);;HDF5 (*.h5 *.hdf5);;All Files (*)")
         if fname:
-            self.browser.openFile(fname)
+            try:
+                self.browser.openFile(fname)
+            except Exception as e:
+                QMessageBox.critical(
+                    self, "Open File", "Failed to load %s:\n%s" % (fname, e))
 
     def _export_pdf(self):
         p = self._current()
@@ -3766,10 +3784,12 @@ class PgWaveWindow(QMainWindow):
         for fkey, wf in self.browser.files.items():
             idx = len(files)
             orig = getattr(wf, '_original_path', None) or wf.fname
-            entry = {'path': os.path.abspath(orig)}
+            entry = {'path': orig if _is_url(orig) else os.path.abspath(orig)}
             pivot_path = getattr(wf, '_pivot_spec_path', None)
             if pivot_path:
                 entry['pivot'] = pivot_path
+            if getattr(wf, 'fmt', None):
+                entry['format'] = wf.fmt
             files.append(entry)
             wf_to_idx[id(wf)] = idx
 
@@ -3782,11 +3802,17 @@ class PgWaveWindow(QMainWindow):
             waves = []
             for tag, (wave, yunit) in widget.wave_data.items():
                 fi = wf_to_idx.get(id(wave.wfile))
-                waves.append({
+                wave_dict = {
                     'file': fi,
                     'name': wave.key,
                     'style': getattr(wave, 'style', 'Lines'),
-                })
+                }
+                if getattr(wave, 'twos_width_bits', None) is not None:
+                    wave_dict['twos_complement_bits'] = wave.twos_width_bits
+                if getattr(wave, 'show_as_digital', False):
+                    wave_dict['digital'] = True
+                    wave_dict['digital_format'] = wave.digital_format
+                waves.append(wave_dict)
             plot_dict = {'name': tab_name, 'waves': waves}
             if widget.custom_xlabel:
                 plot_dict['xlabel'] = widget.custom_xlabel
@@ -3800,6 +3826,25 @@ class PgWaveWindow(QMainWindow):
                      'y': float(a['y'])}
                     for a in widget._annotations
                 ]
+            #- View state: zoom range and cursor positions. Cursors are
+            #- stored in real data coordinates (like annotations) rather
+            #- than pyqtgraph's internal view coordinates (log10-space
+            #- for a log-x plot) so the session file stays readable and
+            #- portable; xrange/yrange are pyqtgraph's own view-space
+            #- values, round-tripped as-is since only pyqtgraph reads
+            #- them back.
+            try:
+                xr, yr = widget.plot.vb.viewRange()
+                plot_dict['xrange'] = [float(xr[0]), float(xr[1])]
+                plot_dict['yrange'] = [float(yr[0]), float(yr[1])]
+            except Exception:
+                pass
+            if widget.cursor_a is not None:
+                plot_dict['cursor_a'] = float(
+                    widget._view_to_data_x(widget.cursor_a))
+            if widget.cursor_b is not None:
+                plot_dict['cursor_b'] = float(
+                    widget._view_to_data_x(widget.cursor_b))
             plots.append(plot_dict)
 
         return {'files': files, 'plots': plots}
@@ -3814,7 +3859,8 @@ class PgWaveWindow(QMainWindow):
         session = self._build_session()
         session_dir = os.path.dirname(os.path.abspath(fname))
         for fe in session.get('files', []):
-            fe['path'] = os.path.relpath(fe['path'], session_dir)
+            if not _is_url(fe['path']):
+                fe['path'] = os.path.relpath(fe['path'], session_dir)
             if 'pivot' in fe:
                 fe['pivot'] = os.path.relpath(fe['pivot'], session_dir)
 
@@ -3839,26 +3885,36 @@ class PgWaveWindow(QMainWindow):
 
         for fe in session.get('files', []):
             fpath = fe['path']
-            if not os.path.isabs(fpath):
+            if not _is_url(fpath) and not os.path.isabs(fpath):
                 fpath = os.path.normpath(os.path.join(session_dir, fpath))
+            fmt = fe.get('format')
             pivot_path = fe.get('pivot')
             if pivot_path and not os.path.isabs(pivot_path):
                 pivot_path = os.path.normpath(
                     os.path.join(session_dir, pivot_path))
 
-            if pivot_path:
-                from .pivot import load_spec, apply_pivot
-                from .wavefiles import WaveFile
-                spec = load_spec(pivot_path)
-                xaxis = self.browser.xaxis or spec.get('columns', '')
-                if not self.browser.xaxis and spec.get('columns'):
-                    self.browser.xaxis = spec['columns']
-                wf = WaveFile(fpath, xaxis)
-                pivoted = apply_pivot(wf.df, spec)
-                name = "pivot(%s)" % os.path.basename(fpath)
-                self.browser.openDataFrame(pivoted, name)
-            else:
-                self.browser.openFile(fpath)
+            try:
+                if pivot_path:
+                    from .pivot import load_spec, apply_pivot
+                    from .wavefiles import WaveFile
+                    spec = load_spec(pivot_path)
+                    xaxis = self.browser.xaxis or spec.get('columns', '')
+                    if not self.browser.xaxis and spec.get('columns'):
+                        self.browser.xaxis = spec['columns']
+                    wf = WaveFile(fpath, xaxis, fmt=fmt)
+                    pivoted = apply_pivot(wf.df, spec)
+                    name = "pivot(%s)" % os.path.basename(fpath)
+                    self.browser.openDataFrame(
+                        pivoted, name,
+                        pivot_spec_path=os.path.abspath(pivot_path),
+                        original_path=(fpath if _is_url(fpath)
+                                       else os.path.abspath(fpath)))
+                else:
+                    self.browser.openFile(fpath, fmt=fmt)
+            except Exception as e:
+                QMessageBox.critical(
+                    self, "Open File",
+                    "Failed to load %s:\n%s" % (fpath, e))
 
         for pd in session.get('plots', []):
             tab_idx = self.tab_widget.count() - 1
@@ -3876,6 +3932,15 @@ class PgWaveWindow(QMainWindow):
                 style = wd.get('style', 'Lines')
                 wave = self._find_wave(wave_name)
                 if wave:
+                    bits = wd.get('twos_complement_bits')
+                    if bits is not None:
+                        wave.twos_width_bits = int(bits)
+                        wave.reload()
+                    if wd.get('digital'):
+                        wave.show_as_digital = True
+                        fmt = wd.get('digital_format')
+                        if fmt:
+                            wave.setDigitalFormat(fmt)
                     result = p.show_wave(wave, style=style)
                     if result:
                         tag, color = result
@@ -3895,6 +3960,23 @@ class PgWaveWindow(QMainWindow):
 
             for ann in pd.get('annotations', []):
                 p.addAnnotation(ann['x'], ann['y'], ann['text'])
+
+            #- View state, applied last so it isn't clobbered by the
+            #- autoRange() each show_wave() call above triggers.
+            if 'xrange' in pd and 'yrange' in pd:
+                try:
+                    p.plot.vb.setRange(
+                        xRange=pd['xrange'], yRange=pd['yrange'],
+                        padding=0)
+                except Exception:
+                    pass
+            for which in ('cursor_a', 'cursor_b'):
+                if which not in pd:
+                    continue
+                xv = float(pd[which])
+                if p._is_logx() and xv > 0:
+                    xv = math.log10(xv)
+                p._set_cursor(which[-1], xv)
 
     def _find_wave(self, name):
         """Look up a PgWave by column name across all loaded files."""
@@ -4457,8 +4539,8 @@ class PgWaveWindow(QMainWindow):
             p.set_metrics_banner(banner.strip())
             p._update_readout()
 
-    def openFile(self, fname, sheet_name=None):
-        self.browser.openFile(fname, sheet_name=sheet_name)
+    def openFile(self, fname, sheet_name=None, fmt=None):
+        self.browser.openFile(fname, sheet_name=sheet_name, fmt=fmt)
 
     def openDataFrame(self, df, name, **kwargs):
         self.browser.openDataFrame(df, name, **kwargs)
@@ -4531,8 +4613,8 @@ class CmdWavePg:
         self.xaxis = effective if effective else None
         self.win = PgWaveWindow(self.xaxis)
 
-    def openFile(self, fname, sheet_name=None):
-        self.win.openFile(fname, sheet_name=sheet_name)
+    def openFile(self, fname, sheet_name=None, fmt=None):
+        self.win.openFile(fname, sheet_name=sheet_name, fmt=fmt)
 
     def openDataFrame(self, df, name, **kwargs):
         self.win.openDataFrame(df, name, **kwargs)

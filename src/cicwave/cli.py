@@ -27,10 +27,16 @@
 ######################################################################
 
 import os
+import re
 import sys
 import glob as _glob
 import click
 from .command import setup_logging
+
+#- Kept in sync with ``wavefiles._is_url``. Duplicated (rather than
+#- imported) so plain ``cicwave --help`` doesn't pay for importing
+#- numpy/pandas/matplotlib via wavefiles.py at module load time.
+_URL_RE = re.compile(r'^https?://', re.IGNORECASE)
 
 
 def _resolve_wave_x_from_cli_env(cli_x):
@@ -81,9 +87,11 @@ def _expand_glob_patterns(files, patterns):
             out.append(path)
 
     for f in files:
-        if os.path.exists(f) or not _looks_like_glob(f):
-            #- Existing file, or a plain path (let downstream report a
+        if _URL_RE.match(f) or os.path.exists(f) or not _looks_like_glob(f):
+            #- URL, existing file, or a plain path (let downstream report a
             #- genuine missing-file error rather than silently dropping it).
+            #- URLs are checked first since a query string (``?``) or an
+            #- API path segment would otherwise look like a glob pattern.
             _add(f)
             continue
         matches = sorted(_glob.glob(f, recursive=True))
@@ -106,7 +114,7 @@ def _expand_glob_patterns(files, patterns):
 def _run_wave_pg(files, x, sheet, pivot_spec=None,
                  pivot_info_flag=False, session_path=None, export_path=None,
                  csv_sep=None, csv_comment=None, twos_bits=None,
-                 twos_cols=None):
+                 twos_cols=None, fmt=None):
     """Run the PyQtGraph waveform viewer."""
     x = _resolve_wave_x_from_cli_env(x)
 
@@ -138,10 +146,15 @@ def _run_wave_pg(files, x, sheet, pivot_spec=None,
 
         if pivot_info_flag:
             for f in files:
-                wf = WaveFile(f, x or "")
-                print("--- %s ---" % f)
-                print(pivot_info(wf.df, spec))
-                print()
+                try:
+                    wf = WaveFile(f, x or "", fmt=fmt)
+                    print("--- %s ---" % f)
+                    print(pivot_info(wf.df, spec))
+                    print()
+                except Exception as e:
+                    print("error: failed to load %s: %s" % (f, e),
+                          file=sys.stderr)
+                    sys.exit(1)
             return
 
         if not x and spec.get('columns'):
@@ -165,25 +178,34 @@ def _run_wave_pg(files, x, sheet, pivot_spec=None,
     if pivot_spec:
         from .analysis import preprocess_dataframe, run_analysis_steps
         for f in files:
-            wf = WaveFile(f, x or "")
-            raw = wf.df.copy()
-            a_block = (spec.get("analysis") or {})
-            raw = preprocess_dataframe(raw, a_block.get("preprocess", {}))
-            pivoted = apply_pivot(raw, spec)
-            if a_block.get("steps"):
-                ar = run_analysis_steps(
-                    pivoted, a_block["steps"],
-                    x_column=spec.get("columns"))
-                summary_text = ar.summary_text
-                if export_path and summary_text.strip():
-                    print(summary_text)
-            name = "pivot(%s)" % os.path.basename(f)
-            c.openDataFrame(pivoted, name,
-                            pivot_spec_path=os.path.abspath(pivot_spec),
-                            original_path=os.path.abspath(f))
+            try:
+                wf = WaveFile(f, x or "", fmt=fmt)
+                raw = wf.df.copy()
+                a_block = (spec.get("analysis") or {})
+                raw = preprocess_dataframe(raw, a_block.get("preprocess", {}))
+                pivoted = apply_pivot(raw, spec)
+                if a_block.get("steps"):
+                    ar = run_analysis_steps(
+                        pivoted, a_block["steps"],
+                        x_column=spec.get("columns"))
+                    summary_text = ar.summary_text
+                    if export_path and summary_text.strip():
+                        print(summary_text)
+                name = "pivot(%s)" % os.path.basename(f)
+                c.openDataFrame(
+                    pivoted, name,
+                    pivot_spec_path=os.path.abspath(pivot_spec),
+                    original_path=f if _URL_RE.match(f) else os.path.abspath(f))
+            except Exception as e:
+                print("error: failed to load %s: %s" % (f, e), file=sys.stderr)
+                sys.exit(1)
     else:
         for f in files:
-            c.openFile(f, sheet_name=sheet)
+            try:
+                c.openFile(f, sheet_name=sheet, fmt=fmt)
+            except Exception as e:
+                print("error: failed to load %s: %s" % (f, e), file=sys.stderr)
+                sys.exit(1)
 
     if export_path and pivot_spec:
         c.win._pending_export_metrics = summary_text or ""
@@ -202,6 +224,13 @@ def _run_wave_pg(files, x, sheet, pivot_spec=None,
 @click.option("--x", default=None,
               help="X-axis column; else CICWAVE_X; else saved default; else auto")
 @click.option("--sheet", default=None, help="Sheet name for Excel files (default: first sheet)")
+@click.option("--format", "fmt", default=None,
+              type=click.Choice(
+                  ["csv", "tsv", "json", "xlsx", "xls", "ods", "parquet",
+                   "feather", "html", "xml", "fwf"], case_sensitive=False),
+              help="Force the data format for a URL source (e.g. a REST "
+                   "API endpoint with no file extension). Ignored for "
+                   "local files, which are always dispatched by extension.")
 @click.option("--pivot", default=None, help="Pivot spec file (YAML/JSON)")
 @click.option("--pivot-info", is_flag=True, default=False, help="Print pivot dimensions and exit")
 @click.option("--session", default=None, help="Load session file (.cicwave.yaml)")
@@ -222,8 +251,8 @@ def _run_wave_pg(files, x, sheet, pivot_spec=None,
                    "(default: all except time/frequency sweep columns).")
 @click.option("--color/--no-color", default=True, help="Enable/Disable color output")
 @click.option("--debug", is_flag=True, default=False, help="Enable debug logging")
-def main(files, globs, x, sheet, pivot, pivot_info, session, export, csv_sep,
-         csv_comment, twos_bits, twos_cols, color, debug):
+def main(files, globs, x, sheet, fmt, pivot, pivot_info, session, export,
+         csv_sep, csv_comment, twos_bits, twos_cols, color, debug):
     """cicwave: Advanced waveform viewer with PyQtGraph backend.
 
     A high-performance waveform viewer focused on PyQtGraph and Qt6 for
@@ -231,6 +260,12 @@ def main(files, globs, x, sheet, pivot, pivot_info, session, export, csv_sep,
 
     Supports: .raw, .csv, .tsv, .xlsx, .json, .parquet, .feather, .npz,
     .h5, .pkl, .vcd (digital), .iqvsa (LitePoint), and more.
+
+    \b
+    URL sources:
+      cicwave https://example.com/data.csv    Any http(s) URL works directly
+      --format json                           Force format for extension-less
+                                               REST endpoints
 
     \b
     Pivot:
@@ -253,11 +288,11 @@ def main(files, globs, x, sheet, pivot, pivot_info, session, export, csv_sep,
     import logging
     level = logging.DEBUG if debug else logging.INFO
     setup_logging(color=color, level=level)
-    
+
     files = _expand_glob_patterns(files, globs)
     _run_wave_pg(files, x, sheet, pivot, pivot_info, session, export,
                  csv_sep=csv_sep, csv_comment=csv_comment,
-                 twos_bits=twos_bits, twos_cols=twos_cols)
+                 twos_bits=twos_bits, twos_cols=twos_cols, fmt=fmt)
 
 
 if __name__ == "__main__":

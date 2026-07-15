@@ -14,6 +14,7 @@ import numpy as np
 
 __all__ = [
     "decode_twos_complement",
+    "DEFAULT_TWOS_SKIP_COLUMNS",
     "rms",
     "resample_uniform",
     "time_base_irregularity",
@@ -32,18 +33,34 @@ __all__ = [
     "AnalysisRunResult",
 ]
 
+#- Column names excluded by default from two's-complement decoding: shared
+#- between the CLI's --twos-complement flag (wavefiles.WaveFile) and a
+#- pivot spec's analysis.preprocess.twos_complement block, so both entry
+#- points protect the same sweep/x-axis columns.
+DEFAULT_TWOS_SKIP_COLUMNS = frozenset((
+    "time", "Time [s]", "frequency", "temp-sweep",
+    "v(v-sweep)", "i(i-sweep)",
+))
+
 
 def decode_twos_complement(
         codes: np.ndarray,
         width_bits: int) -> np.ndarray:
-    """Map unsigned *width_bits*-wide integers to signed 2's complement."""
+    """Map unsigned *width_bits*-wide integers to signed 2's complement.
+
+    Non-finite input samples (NaN/inf, e.g. blank CSV cells) pass through
+    as NaN rather than being silently cast to a bogus code of 0.
+    """
     if width_bits < 1 or width_bits > 63:
         raise ValueError("width_bits must be in [1, 63], got %s" % width_bits)
-    c = np.asarray(codes, dtype=np.int64)
+    arr = np.asarray(codes, dtype=np.float64)
+    finite = np.isfinite(arr)
+    c = np.where(finite, arr, 0).astype(np.int64)
     mask = (1 << width_bits) - 1
     c = c & mask
     sign = 1 << (width_bits - 1)
-    return np.where(c >= sign, c - (1 << width_bits), c).astype(np.float64)
+    decoded = np.where(c >= sign, c - (1 << width_bits), c).astype(np.float64)
+    return np.where(finite, decoded, np.nan)
 
 
 def rms(y: np.ndarray) -> float:
@@ -786,7 +803,7 @@ def preprocess_dataframe(df, preprocess: Optional[Mapping[str, Any]]):
         cols = tc.get("columns")
         if cols is None:
             cols = [c for c in out.columns
-                    if str(c).lower() not in ("time", "time [s]")]
+                    if c not in DEFAULT_TWOS_SKIP_COLUMNS]
         for c in cols:
             if c in out.columns:
                 out[c] = decode_twos_complement(

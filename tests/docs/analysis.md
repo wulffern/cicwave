@@ -152,11 +152,11 @@ wave example](/cicwave/examples#single-wave), and plots the resulting
 spectrum like any other CSV.
 ([`session_spectrum.cicwave.yaml`](https://github.com/wulffern/cicwave/blob/main/tests/docs/session_spectrum.cicwave.yaml))
 
-```bash
-cicwave --session session_spectrum.cicwave.yaml --export wave_spectrum.svg
-```
+<!--run_image:
+run: cicwave --session session_spectrum.cicwave.yaml --export wave_spectrum.svg
+output_image: wave_spectrum.svg
+-->
 
-![](/cicwave/assets/wave_spectrum.svg)
 ### ADC PSD dialog
 
 Tailored for ADC bench data and behavioural simulations, inspired by

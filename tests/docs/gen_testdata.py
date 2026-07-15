@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Generate synthetic sample data used by the docs examples page.
 
-Run from tests/docs/. Produces test.csv (a comparator-like transient) and
-pivot_data.csv (an amplifier gain/phase sweep at three temperatures) so
-`make docs` can export real plots from real cicwave sessions.
+Run from tests/docs/. Produces test.csv (a comparator-like transient),
+pivot_data.csv (an amplifier gain/phase sweep at three temperatures),
+and spectrum_data.csv (a PSD of the transient, via cicwave's own FFT
+backend) so `make docs` can export real plots from real cicwave
+sessions.
 """
 
 import numpy as np
@@ -44,4 +46,19 @@ for temp, gain0 in ((-40, 43.0), (27, 42.1), (125, 41.2)):
 
 pd.DataFrame(rows).to_csv("pivot_data.csv", index=False)
 
-print("Wrote test.csv, pivot_data.csv")
+# --- Spectrum data: PSD of the v(vp) tone, via cicwave's own FFT ------
+#- Uses the same psd_rfft() the GUI's right-click "FFT / PSD" menu item
+#- calls, so the plot below is a real cicwave PSD, not a hand-drawn one.
+
+from cicwave.analysis import psd_rfft
+
+#- Column named exactly "frequency" so cicwave auto-selects it as the
+#- x-axis with a log scale (see Wave.reload() in wavefiles.py), matching
+#- how the GUI's own FFT/PSD plots look.
+psd = psd_rfft(t, vp)
+pd.DataFrame({
+    "frequency": psd.freq_hz,
+    "PSD_dB": psd.psd_db,
+}).to_csv("spectrum_data.csv", index=False)
+
+print("Wrote test.csv, pivot_data.csv, spectrum_data.csv")

@@ -32,6 +32,13 @@ pip install -e .
 cicwave data.raw
 ```
 
+It also opens data straight from a URL — see [URL
+sources](/cicwave/url-sources):
+
+```bash
+cicwave https://raw.githubusercontent.com/owid/co2-data/master/owid-co2-data.csv
+```
+
 <!--run_output:
 run: cicwave --help
 -->
@@ -40,6 +47,7 @@ run: cicwave --help
 
 - [Usage](/cicwave/usage) — command-line options, basic usage, environment variables
 - [File formats](/cicwave/formats) — supported file formats and automatic unit detection
+- [URL sources](/cicwave/url-sources) — loading data straight from a REST/CSV URL
 - [Pivot](/cicwave/pivot) — reshaping long-format data into waveforms
 - [Sessions](/cicwave/sessions) — saving and restoring a viewer state
 - [GUI and analysis](/cicwave/analysis) — keyboard shortcuts, mouse controls, analysis tools
