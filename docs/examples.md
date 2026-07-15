@@ -22,6 +22,7 @@ to that directory to reproduce these locally.
 ## Single wave
 
 Plot a single voltage signal:
+([`session_single.cicwave.yaml`](https://github.com/wulffern/cicwave/blob/main/tests/docs/session_single.cicwave.yaml))
 
 ```bash
 cicwave --session session_single.cicwave.yaml --export wave_single.svg
@@ -31,6 +32,7 @@ cicwave --session session_single.cicwave.yaml --export wave_single.svg
 ## Multiple waves
 
 Plot multiple signals on the same axes:
+([`session_multi.cicwave.yaml`](https://github.com/wulffern/cicwave/blob/main/tests/docs/session_multi.cicwave.yaml))
 
 ```bash
 cicwave --session session_multi.cicwave.yaml --export wave_multi.svg
@@ -41,6 +43,7 @@ cicwave --session session_multi.cicwave.yaml --export wave_multi.svg
 
 When voltage and current signals are plotted together, the pg backend
 automatically assigns them to separate Y-axes based on their unit:
+([`session_dual.cicwave.yaml`](https://github.com/wulffern/cicwave/blob/main/tests/docs/session_dual.cicwave.yaml))
 
 ```bash
 cicwave --session session_dual.cicwave.yaml --export wave_dual.svg
@@ -71,6 +74,8 @@ plots:
 
 Reshaping a long-format sweep (`Parameter`, `Frequency`, `Measurement`,
 `Temp`) into per-temperature gain waves with a [pivot spec](/cicwave/pivot):
+([`session_pivot.cicwave.yaml`](https://github.com/wulffern/cicwave/blob/main/tests/docs/session_pivot.cicwave.yaml),
+[`pivot_spec.yaml`](https://github.com/wulffern/cicwave/blob/main/tests/docs/pivot_spec.yaml))
 
 ```bash
 cat pivot_spec.yaml
@@ -103,7 +108,9 @@ same way the synthetic pivot example above does.
 ### Climate: CO2 emissions per country
 
 Data: [Our World in Data CO2 & greenhouse gas emissions
-dataset](https://github.com/owid/co2-data), loaded directly by URL:
+dataset](https://github.com/owid/co2-data), loaded directly by URL.
+([`session_url_climate.cicwave.yaml`](https://github.com/wulffern/cicwave/blob/main/tests/docs/session_url_climate.cicwave.yaml),
+[`pivot_spec_climate.yaml`](https://github.com/wulffern/cicwave/blob/main/tests/docs/pivot_spec_climate.yaml))
 
 ```bash
 cicwave https://raw.githubusercontent.com/owid/co2-data/master/owid-co2-data.csv \
@@ -139,7 +146,9 @@ cicwave --session session_url_climate.cicwave.yaml --export wave_url_climate.svg
 
 Data: [Our World in Data excess mortality
 dataset](https://github.com/owid/covid-19-data/tree/master/public/data/excess_mortality)
-(P-score = % deaths above the pre-pandemic baseline):
+(P-score = % deaths above the pre-pandemic baseline).
+([`session_url_mortality.cicwave.yaml`](https://github.com/wulffern/cicwave/blob/main/tests/docs/session_url_mortality.cicwave.yaml),
+[`pivot_spec_mortality.yaml`](https://github.com/wulffern/cicwave/blob/main/tests/docs/pivot_spec_mortality.yaml))
 
 ```bash
 cicwave https://raw.githubusercontent.com/owid/covid-19-data/master/public/data/excess_mortality/excess_mortality.csv \

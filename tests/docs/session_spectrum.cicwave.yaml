@@ -1,0 +1,9 @@
+files:
+  - path: spectrum_data.csv
+plots:
+  - name: Spectrum
+    title: "PSD of v(vp), Hanning window"
+    waves:
+      - file: 0
+        name: "PSD_dB"
+        style: Lines

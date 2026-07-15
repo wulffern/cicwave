@@ -2100,7 +2100,16 @@ class PgWavePlot(QWidget):
         try:
             xr = self.plot.vb.viewRange()[0]
             yr = self.plot.vb.viewRange()[1]
-            ax.set_xlim(xr[0], xr[1])
+            #- In log-x mode, pyqtgraph's ViewBox reports the range in
+            #- log10 space (it pre-transforms data before plotting rather
+            #- than using a "true" log axis); matplotlib's set_xlim wants
+            #- real data values, so undo that transform first. Without
+            #- this, an exported log-x plot (e.g. a frequency sweep) gets
+            #- an x-range of ~[5, 8] instead of [1e5, 1e8] and renders
+            #- blank.
+            x0 = self._view_to_data_x(xr[0])
+            x1 = self._view_to_data_x(xr[1])
+            ax.set_xlim(x0, x1)
             ax.set_ylim(yr[0], yr[1])
         except Exception:
             pass

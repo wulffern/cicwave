@@ -110,30 +110,12 @@ plots:
 A minimal session with two waves and one annotation:
 ([`session_annotations.cicwave.yaml`](https://github.com/wulffern/cicwave/blob/main/tests/docs/session_annotations.cicwave.yaml))
 
-session_annotations.cicwave.yaml:
-```yaml
-files:
-  - path: test.csv
-plots:
-  - name: Annotated
-    title: Comparator inputs with annotation
-    waves:
-      - file: 0
-        name: "v(vp)"
-        style: Lines
-      - file: 0
-        name: "v(vn)"
-        style: Lines
-    annotations:
-      - text: "crossing"
-        x: 5.0e-7
-        y: 0.9
+<!--cat:
+file: session_annotations.cicwave.yaml
+language: yaml
+-->
 
-```
-
-
-```bash
-cicwave --session session_annotations.cicwave.yaml --export wave_annotations.svg
-```
-
-![](/cicwave/assets/wave_annotations.svg)
+<!--run_image:
+run: cicwave --session session_annotations.cicwave.yaml --export wave_annotations.svg
+output_image: wave_annotations.svg
+-->
