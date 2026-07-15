@@ -122,6 +122,7 @@ Options:
 - [Pivot](/cicwave/pivot) — reshaping long-format data into waveforms
 - [Sessions](/cicwave/sessions) — saving and restoring a viewer state
 - [GUI and analysis](/cicwave/analysis) — keyboard shortcuts, mouse controls, analysis tools
+- [MCP server](/cicwave/mcp) — `cicwave-mcp`: plot/analyze tools for driving cicwave from an agent
 - [Examples](/cicwave/examples) — example plots, generated fresh on every docs build
 
 ## Related projects

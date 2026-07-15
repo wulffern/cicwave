@@ -45,14 +45,23 @@ repo. As such, you're here.
 - **Multi-dimensional data pivoting** with YAML specifications
 - **Digital waveform support** with separate analog/digital panes  
 - **Session save/restore** with `.cicwave.yaml` files
-- **Export capabilities** to PDF, PNG, SVG formats
+- **Export capabilities** to PDF, PNG, SVG formats, and the underlying
+  data itself (CSV/TSV/Parquet/Feather/HDF5) via `--export-data`
 - **Engineering unit formatting** and auto-detection
 - **GPU-accelerated plotting** for smooth interaction with large datasets
+- **MCP server** (`cicwave-mcp`, optional): plot/analyze tools for an
+  agent driving tests to call directly — see [docs](https://wulffern.github.io/cicwave/mcp)
 
 ## Installation
 
 ```bash
 pip install cicwave
+```
+
+For the MCP server (agent-driven plotting/analysis; requires Python 3.10+):
+
+```bash
+pip install "cicwave[mcp]"
 ```
 
 For development installation:
