@@ -6,6 +6,7 @@ Waveform viewer using PySide6 + pyqtgraph.
 Install:  pip install PySide6 pyqtgraph
 """
 
+import math
 import os
 import sys
 import re
@@ -3801,11 +3802,17 @@ class PgWaveWindow(QMainWindow):
             waves = []
             for tag, (wave, yunit) in widget.wave_data.items():
                 fi = wf_to_idx.get(id(wave.wfile))
-                waves.append({
+                wave_dict = {
                     'file': fi,
                     'name': wave.key,
                     'style': getattr(wave, 'style', 'Lines'),
-                })
+                }
+                if getattr(wave, 'twos_width_bits', None) is not None:
+                    wave_dict['twos_complement_bits'] = wave.twos_width_bits
+                if getattr(wave, 'show_as_digital', False):
+                    wave_dict['digital'] = True
+                    wave_dict['digital_format'] = wave.digital_format
+                waves.append(wave_dict)
             plot_dict = {'name': tab_name, 'waves': waves}
             if widget.custom_xlabel:
                 plot_dict['xlabel'] = widget.custom_xlabel
@@ -3819,6 +3826,25 @@ class PgWaveWindow(QMainWindow):
                      'y': float(a['y'])}
                     for a in widget._annotations
                 ]
+            #- View state: zoom range and cursor positions. Cursors are
+            #- stored in real data coordinates (like annotations) rather
+            #- than pyqtgraph's internal view coordinates (log10-space
+            #- for a log-x plot) so the session file stays readable and
+            #- portable; xrange/yrange are pyqtgraph's own view-space
+            #- values, round-tripped as-is since only pyqtgraph reads
+            #- them back.
+            try:
+                xr, yr = widget.plot.vb.viewRange()
+                plot_dict['xrange'] = [float(xr[0]), float(xr[1])]
+                plot_dict['yrange'] = [float(yr[0]), float(yr[1])]
+            except Exception:
+                pass
+            if widget.cursor_a is not None:
+                plot_dict['cursor_a'] = float(
+                    widget._view_to_data_x(widget.cursor_a))
+            if widget.cursor_b is not None:
+                plot_dict['cursor_b'] = float(
+                    widget._view_to_data_x(widget.cursor_b))
             plots.append(plot_dict)
 
         return {'files': files, 'plots': plots}
@@ -3906,6 +3932,15 @@ class PgWaveWindow(QMainWindow):
                 style = wd.get('style', 'Lines')
                 wave = self._find_wave(wave_name)
                 if wave:
+                    bits = wd.get('twos_complement_bits')
+                    if bits is not None:
+                        wave.twos_width_bits = int(bits)
+                        wave.reload()
+                    if wd.get('digital'):
+                        wave.show_as_digital = True
+                        fmt = wd.get('digital_format')
+                        if fmt:
+                            wave.setDigitalFormat(fmt)
                     result = p.show_wave(wave, style=style)
                     if result:
                         tag, color = result
@@ -3925,6 +3960,23 @@ class PgWaveWindow(QMainWindow):
 
             for ann in pd.get('annotations', []):
                 p.addAnnotation(ann['x'], ann['y'], ann['text'])
+
+            #- View state, applied last so it isn't clobbered by the
+            #- autoRange() each show_wave() call above triggers.
+            if 'xrange' in pd and 'yrange' in pd:
+                try:
+                    p.plot.vb.setRange(
+                        xRange=pd['xrange'], yRange=pd['yrange'],
+                        padding=0)
+                except Exception:
+                    pass
+            for which in ('cursor_a', 'cursor_b'):
+                if which not in pd:
+                    continue
+                xv = float(pd[which])
+                if p._is_logx() and xv > 0:
+                    xv = math.log10(xv)
+                p._set_cursor(which[-1], xv)
 
     def _find_wave(self, name):
         """Look up a PgWave by column name across all loaded files."""

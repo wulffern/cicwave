@@ -156,5 +156,114 @@ class SessionFormatPersistenceTest(unittest.TestCase):
         self.assertEqual(list(wf2.df.columns), ["time", "v"])
 
 
+@unittest.skipUnless(HAVE_PG, "pyqtgraph / PySide6 not installed")
+class SessionViewStateTest(unittest.TestCase):
+    """Per-wave settings and plot view state must round-trip through
+    Save/Load Session, not just file paths/pivot/format."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="cicwave-session-view-")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_per_wave_and_view_state_round_trip(self):
+        df = pd.DataFrame({
+            "time": [0, 1, 2, 3, 4],
+            "code": [100, 200, 4095, 300, 50],
+        })
+        csv = os.path.join(self.tmp, "adc.csv")
+        df.to_csv(csv, index=False)
+
+        c = CmdWavePg("time")
+        win = c.win
+        win.browser.openFile(csv)
+        wave = win._find_wave("code")
+        wave.twos_width_bits = 12
+        wave.reload()
+        wave.show_as_digital = True
+        wave.setDigitalFormat("dec")
+
+        p = win.tab_widget.widget(win.tab_widget.count() - 1)
+        p.show_wave(wave, style="Lines")
+        p._set_cursor('a', 1.5)
+        p._set_cursor('b', 3.0)
+        p.plot.vb.setRange(xRange=[0, 4], yRange=[-100, 4200], padding=0)
+
+        session = win._build_session()
+        wd = session["plots"][0]["waves"][0]
+        self.assertEqual(wd["twos_complement_bits"], 12)
+        self.assertTrue(wd["digital"])
+        self.assertEqual(wd["digital_format"], "dec")
+        pd_ = session["plots"][0]
+        self.assertEqual(pd_["xrange"], [0.0, 4.0])
+        self.assertEqual(pd_["yrange"], [-100.0, 4200.0])
+        self.assertAlmostEqual(pd_["cursor_a"], 1.5)
+        self.assertAlmostEqual(pd_["cursor_b"], 3.0)
+
+        session_path = os.path.join(self.tmp, "session.cicwave.yaml")
+        with open(session_path, "w") as f:
+            yaml.safe_dump(session, f)
+
+        c2 = CmdWavePg("time")
+        win2 = c2.win
+        win2.applySession(session_path)
+
+        wave2 = win2._find_wave("code")
+        self.assertEqual(wave2.twos_width_bits, 12)
+        self.assertTrue(wave2.show_as_digital)
+        self.assertEqual(wave2.digital_format, "dec")
+        # 4095 (12-bit unsigned) decodes to -1 signed; confirms the
+        # decode was actually re-applied, not just the flag restored.
+        self.assertAlmostEqual(list(wave2.y)[2], -1.0)
+
+        p2 = win2.tab_widget.widget(win2.tab_widget.count() - 1)
+        self.assertAlmostEqual(p2.cursor_a, 1.5)
+        self.assertAlmostEqual(p2.cursor_b, 3.0)
+        xr, yr = p2.plot.vb.viewRange()
+        self.assertAlmostEqual(xr[0], 0.0)
+        self.assertAlmostEqual(xr[1], 4.0)
+        self.assertAlmostEqual(yr[0], -100.0)
+        self.assertAlmostEqual(yr[1], 4200.0)
+
+    def test_cursor_on_log_x_plot_round_trips_through_data_space(self):
+        import numpy as np
+
+        freq = np.logspace(3, 8, 100)
+        gain = -20 * np.log10(freq / 1e6)
+        csv = os.path.join(self.tmp, "ac.csv")
+        pd.DataFrame({"frequency": freq, "gain": gain}).to_csv(
+            csv, index=False)
+
+        c = CmdWavePg(None)
+        win = c.win
+        win.browser.openFile(csv)
+        wave = win._find_wave("gain")
+        p = win.tab_widget.widget(win.tab_widget.count() - 1)
+        p.show_wave(wave, style="Lines")
+        self.assertTrue(p._is_logx())
+
+        # Simulate a cursor placed at 1 MHz: pyqtgraph stores this as
+        # log10(1e6) in view space.
+        p._set_cursor('a', 6.0)
+
+        session = win._build_session()
+        # The session file must record the real frequency, not the
+        # log10 view-space value, so it stays human-readable/portable.
+        self.assertAlmostEqual(session["plots"][0]["cursor_a"], 1e6,
+                               delta=1.0)
+
+        session_path = os.path.join(self.tmp, "session.cicwave.yaml")
+        with open(session_path, "w") as f:
+            yaml.safe_dump(session, f)
+
+        c2 = CmdWavePg(None)
+        win2 = c2.win
+        win2.applySession(session_path)
+        p2 = win2.tab_widget.widget(win2.tab_widget.count() - 1)
+        self.assertAlmostEqual(p2.cursor_a, 6.0, places=3)
+
+
 if __name__ == "__main__":
     unittest.main()

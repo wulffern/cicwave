@@ -59,10 +59,19 @@ plots:
       - file: 0
         name: "v(in)"
         style: Lines
+      - file: 0
+        name: "adc_code"
+        twos_complement_bits: 12      # optional per-wave 2's complement decode
+        digital: true                 # optional: show in the digital pane
+        digital_format: hex           # hex (default) / dec / bin
     annotations:                      # optional list of text annotations
       - text: "settling"
         x: 1.5e-6
         y: 0.9
+    xrange: [0, 2.0e-6]                # optional: saved zoom (x)
+    yrange: [-0.5, 2.0]                # optional: saved zoom (y)
+    cursor_a: 5.0e-7                   # optional: cursor A position (data coords)
+    cursor_b: 1.5e-6                   # optional: cursor B position
 
   - name: "DC sweep"                 # second tab
     waves:
@@ -91,6 +100,8 @@ plots:
 | `ylabel` | no | Custom y-axis label |
 | `waves` | yes | List of waves to plot (see below) |
 | `annotations` | no | List of text annotations (see below) |
+| `xrange`, `yrange` | no | `[min, max]` zoom range to restore, in pyqtgraph's own view coordinates (log10-space on the x-axis for a log-x plot) |
+| `cursor_a`, `cursor_b` | no | Cursor A/B position, in real data coordinates (like `annotations`, not view coordinates) |
 
 **`waves`** — list of signals to plot in a tab:
 
@@ -99,6 +110,9 @@ plots:
 | `file` | yes | Zero-based index into the `files` list |
 | `name` | yes | Column name (signal name) in the data file |
 | `style` | no | Plot style: `Lines` (default), `Markers`, `Lines+Markers`, or `Steps` |
+| `twos_complement_bits` | no | Decode this wave as *N*-bit signed two's complement (per-wave; independent of the global `--twos-complement` flag) |
+| `digital` | no | `true` to show this wave in the digital pane instead of the analog axes |
+| `digital_format` | no | Vector display format when `digital: true`: `hex` (default), `dec`, or `bin` |
 
 **`annotations`** — list of text labels placed on the plot:
 
