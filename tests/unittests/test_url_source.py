@@ -23,6 +23,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         elif self.path == "/unlabeled":
             # No extension AND no informative Content-Type.
             self._send(b"time,v\n0,1\n1,2\n", "application/octet-stream")
+        elif self.path == "/rest-tsv":
+            # Extension-less, tab-separated: needs --format txt/tsv.
+            self._send(b"time\tv\n0\t1\n1\t2\n", "application/octet-stream")
         elif self.path == "/data.pkl":
             self._send(b"not a real pickle", "application/octet-stream")
         else:
@@ -79,6 +82,11 @@ class TestUrlSource(unittest.TestCase):
     def test_format_override_forces_dispatch(self):
         wf = WaveFile(self.base + "/rest-endpoint", xaxis="x", fmt="json")
         self.assertEqual(list(wf.df.columns), ["x", "y"])
+
+    def test_format_txt_forces_tab_separated_dispatch(self):
+        wf = WaveFile(self.base + "/rest-tsv", xaxis="time", fmt="txt")
+        self.assertEqual(list(wf.df.columns), ["time", "v"])
+        self.assertEqual(len(wf.df), 2)
 
     def test_unresolvable_format_raises_with_hint(self):
         # Remote sources fetch eagerly on open (no cheap header-only

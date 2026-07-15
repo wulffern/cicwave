@@ -113,8 +113,8 @@ def _expand_glob_patterns(files, patterns):
 
 def _run_wave_pg(files, x, sheet, pivot_spec=None,
                  pivot_info_flag=False, session_path=None, export_path=None,
-                 csv_sep=None, csv_comment=None, twos_bits=None,
-                 twos_cols=None, fmt=None):
+                 export_data_path=None, csv_sep=None, csv_comment=None,
+                 twos_bits=None, twos_cols=None, fmt=None):
     """Run the PyQtGraph waveform viewer."""
     x = _resolve_wave_x_from_cli_env(x)
 
@@ -207,11 +207,11 @@ def _run_wave_pg(files, x, sheet, pivot_spec=None,
                 print("error: failed to load %s: %s" % (f, e), file=sys.stderr)
                 sys.exit(1)
 
-    if export_path and pivot_spec:
+    if (export_path or export_data_path) and pivot_spec:
         c.win._pending_export_metrics = summary_text or ""
         c.win.autoplot_pivot_for_export()
-    if export_path:
-        c.exportAndExit(export_path)
+    if export_path or export_data_path:
+        c.exportAndExit(export_path, export_data_path)
     else:
         c.run()
 
@@ -226,8 +226,9 @@ def _run_wave_pg(files, x, sheet, pivot_spec=None,
 @click.option("--sheet", default=None, help="Sheet name for Excel files (default: first sheet)")
 @click.option("--format", "fmt", default=None,
               type=click.Choice(
-                  ["csv", "tsv", "json", "xlsx", "xls", "ods", "parquet",
-                   "feather", "html", "xml", "fwf"], case_sensitive=False),
+                  ["csv", "tsv", "txt", "json", "xlsx", "xls", "ods",
+                   "parquet", "feather", "html", "xml", "fwf"],
+                  case_sensitive=False),
               help="Force the data format for a URL source (e.g. a REST "
                    "API endpoint with no file extension). Ignored for "
                    "local files, which are always dispatched by extension.")
@@ -235,6 +236,10 @@ def _run_wave_pg(files, x, sheet, pivot_spec=None,
 @click.option("--pivot-info", is_flag=True, default=False, help="Print pivot dimensions and exit")
 @click.option("--session", default=None, help="Load session file (.cicwave.yaml)")
 @click.option("--export", default=None, help="Export plot to file (PDF/PNG/SVG) and exit")
+@click.option("--export-data", "export_data", default=None,
+              help="Export the plotted wave data (not the image) to file "
+                   "(CSV/TSV/Parquet/Feather/HDF5) and exit. Combine with "
+                   "--export to write both. Headless, like --export.")
 @click.option("--csv-sep", "csv_sep", default=None, metavar="SEP",
               help="Override CSV delimiter for all .csv files in this run "
                    "(e.g. ';', '|', 'tab'). Disables auto-sniffing.")
@@ -252,7 +257,8 @@ def _run_wave_pg(files, x, sheet, pivot_spec=None,
 @click.option("--color/--no-color", default=True, help="Enable/Disable color output")
 @click.option("--debug", is_flag=True, default=False, help="Enable debug logging")
 def main(files, globs, x, sheet, fmt, pivot, pivot_info, session, export,
-         csv_sep, csv_comment, twos_bits, twos_cols, color, debug):
+         export_data, csv_sep, csv_comment, twos_bits, twos_cols, color,
+         debug):
     """cicwave: Advanced waveform viewer with PyQtGraph backend.
 
     A high-performance waveform viewer focused on PyQtGraph and Qt6 for
@@ -275,7 +281,8 @@ def main(files, globs, x, sheet, fmt, pivot, pivot_info, session, export,
     \b
     Session:
       --session plot.cicwave.yaml         Load saved session
-      --export plot.pdf                   Export to file and exit (no GUI)
+      --export plot.pdf                   Export image and exit (no GUI)
+      --export-data out.csv               Export plotted data and exit
       --session s.yaml --export out.pdf   Restore session and export
 
     \b
@@ -291,8 +298,9 @@ def main(files, globs, x, sheet, fmt, pivot, pivot_info, session, export,
 
     files = _expand_glob_patterns(files, globs)
     _run_wave_pg(files, x, sheet, pivot, pivot_info, session, export,
-                 csv_sep=csv_sep, csv_comment=csv_comment,
-                 twos_bits=twos_bits, twos_cols=twos_cols, fmt=fmt)
+                 export_data_path=export_data, csv_sep=csv_sep,
+                 csv_comment=csv_comment, twos_bits=twos_bits,
+                 twos_cols=twos_cols, fmt=fmt)
 
 
 if __name__ == "__main__":

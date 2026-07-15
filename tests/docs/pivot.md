@@ -118,6 +118,19 @@ analysis:
 |--------|------|-------------|
 | `rms` | `column` | Prints the RMS value of `column` |
 | `dynamic_parameters` | `y_column`, `fs`; optional `f0`, `fmin`, `fmax`, `remove_dc`, `osr`, `exclude_harmonics`, `sigma_delta_lobe` | Computes SNR, SNDR, ENOB from an FFT of `y_column` |
+| `adc_psd` | `y_column`, `fs`; optional `f0`, `max_harmonics`, `osr`, `exclude_harmonics`, `dbfs_amplitude`, `filterwidth`, `fund_filterwidth`, `remove_dc` | Same backend as the GUI's [ADC PSD dialog](/cicwave/analysis#adc-psd-dialog): SNR/SNDR/ENOB/SFDR plus a per-harmonic breakdown |
+| `linear_fit` | `y_column`; optional `x_column` (defaults to the spec's `columns` x-axis) | Least-squares slope/intercept/r/r² of `y_column` vs `x_column` |
+| `difference` | `a_column`, `b_column` | Element-wise `a - b` (trimmed to the shorter length); reports mean/RMS/max-abs |
 
 Use `--pivot-info` and the [analysis dialogs](/cicwave/analysis) in the GUI to
 work out sensible `fs`/`f0` values before scripting a headless export.
+
+## Headless data export
+
+`--pivot` combined with [`--export-data`](/cicwave/usage#exporting-without-the-gui)
+writes the pivoted (and preprocessed) DataFrame itself — not just a plot
+image — so a CI job can pull the reshaped numbers directly:
+
+```bash
+cicwave pivot_data.csv --pivot pivot_spec.yaml --export-data pivoted.csv
+```

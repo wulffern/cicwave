@@ -65,7 +65,8 @@ Usage: cicwave [OPTIONS] [FILES]...
 
   Session:
     --session plot.cicwave.yaml         Load saved session
-    --export plot.pdf                   Export to file and exit (no GUI)
+    --export plot.pdf                   Export image and exit (no GUI)
+    --export-data out.csv               Export plotted data and exit
     --session s.yaml --export out.pdf   Restore session and export
 
   Globs:
@@ -81,7 +82,7 @@ Options:
                                   default; else auto
   --sheet TEXT                    Sheet name for Excel files (default: first
                                   sheet)
-  --format [csv|tsv|json|xlsx|xls|ods|parquet|feather|html|xml|fwf]
+  --format [csv|tsv|txt|json|xlsx|xls|ods|parquet|feather|html|xml|fwf]
                                   Force the data format for a URL source (e.g.
                                   a REST API endpoint with no file extension).
                                   Ignored for local files, which are always
@@ -90,6 +91,10 @@ Options:
   --pivot-info                    Print pivot dimensions and exit
   --session TEXT                  Load session file (.cicwave.yaml)
   --export TEXT                   Export plot to file (PDF/PNG/SVG) and exit
+  --export-data TEXT              Export the plotted wave data (not the image)
+                                  to file (CSV/TSV/Parquet/Feather/HDF5) and
+                                  exit. Combine with --export to write both.
+                                  Headless, like --export.
   --csv-sep SEP                   Override CSV delimiter for all .csv files in
                                   this run (e.g. ';', '|', 'tab'). Disables
                                   auto-sniffing.

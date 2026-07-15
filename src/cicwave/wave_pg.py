@@ -123,6 +123,18 @@ def _style_kwargs(color, style, width=2):
     return dict(pen=pen)
 
 
+def _tab_suffixed(fname, tab_index):
+    """Insert ``_<tab_index>`` before the extension for tab > 0.
+
+    Used when a session has multiple plot tabs but only one output path
+    was given: ``plot.pdf`` -> ``plot.pdf``, ``plot_1.pdf``, ``plot_2.pdf``.
+    """
+    if tab_index <= 0:
+        return fname
+    base, ext = os.path.splitext(fname)
+    return "%s_%d%s" % (base, tab_index, ext)
+
+
 _eng_cache = {}
 
 
@@ -4623,17 +4635,27 @@ class CmdWavePg:
         self.win.show()
         self.app.exec()
 
-    def exportAndExit(self, fname):
-        """Export the current plot to a file without showing the GUI."""
+    def exportAndExit(self, fname=None, data_fname=None):
+        """Export the current plot image and/or its data, then quit.
+
+        ``fname`` writes a plot image (PDF/PNG/SVG) via the same code
+        path as File > Export PDF; ``data_fname`` writes the plotted
+        wave data (CSV/TSV/Parquet/Feather/HDF5) via the same code path
+        as File > Export Data. Either or both may be given.
+        """
         for ti in range(self.win.tab_widget.count()):
             widget = self.win.tab_widget.widget(ti)
             if isinstance(widget, PgWavePlot) and widget.wave_data:
-                if self.win.tab_widget.count() > 1:
-                    base, ext = os.path.splitext(fname)
-                    out = "%s_%d%s" % (base, ti, ext) if ti > 0 else fname
-                else:
-                    out = fname
-                widget._export_matplotlib(out)
-                print("Exported: %s" % out)
+                multi = self.win.tab_widget.count() > 1
+                if fname:
+                    out = _tab_suffixed(fname, ti) if multi else fname
+                    widget._export_matplotlib(out)
+                    print("Exported: %s" % out)
+                if data_fname:
+                    out = (_tab_suffixed(data_fname, ti) if multi
+                           else data_fname)
+                    n_traces, n_rows = widget._export_data_to(out)
+                    print("Exported: %s (%d trace(s), %d row(s))"
+                          % (out, n_traces, n_rows))
                 break
         self.app.quit()

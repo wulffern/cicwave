@@ -70,6 +70,38 @@ class TestCsvCommentCliFlag(unittest.TestCase):
             self.assertEqual(run.call_args.kwargs.get("csv_comment"), "")
 
 
+class TestFormatCliFlag(unittest.TestCase):
+    def test_txt_is_an_accepted_format_choice(self):
+        # Regression: --format only offered tsv/csv/json/... but not txt,
+        # even though wavefiles.py's remote dispatch supports it.
+        with mock.patch.object(cli_mod, "_run_wave_pg") as run:
+            result = _runner().invoke(main, ["--format", "txt"])
+            self.assertEqual(
+                result.exit_code, 0,
+                "expected clean exit, got %r\n%s"
+                % (result.exit_code, result.output))
+            run.assert_called_once()
+            self.assertEqual(run.call_args.kwargs.get("fmt"), "txt")
+
+    def test_invalid_format_choice_rejected(self):
+        result = _runner().invoke(main, ["--format", "bogus"])
+        self.assertEqual(result.exit_code, 2)
+
+
+class TestExportDataCliFlag(unittest.TestCase):
+    def test_export_data_is_forwarded_to_run(self):
+        with mock.patch.object(cli_mod, "_run_wave_pg") as run:
+            result = _runner().invoke(
+                main, ["--export-data", "out.csv"])
+            self.assertEqual(
+                result.exit_code, 0,
+                "expected clean exit, got %r\n%s"
+                % (result.exit_code, result.output))
+            run.assert_called_once()
+            self.assertEqual(
+                run.call_args.kwargs.get("export_data_path"), "out.csv")
+
+
 class TestPositionalGlobExpansion(unittest.TestCase):
     """Positional wildcard paths must expand even when the shell doesn't.
 
