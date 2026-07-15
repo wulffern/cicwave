@@ -146,10 +146,15 @@ def _run_wave_pg(files, x, sheet, pivot_spec=None,
 
         if pivot_info_flag:
             for f in files:
-                wf = WaveFile(f, x or "", fmt=fmt)
-                print("--- %s ---" % f)
-                print(pivot_info(wf.df, spec))
-                print()
+                try:
+                    wf = WaveFile(f, x or "", fmt=fmt)
+                    print("--- %s ---" % f)
+                    print(pivot_info(wf.df, spec))
+                    print()
+                except Exception as e:
+                    print("error: failed to load %s: %s" % (f, e),
+                          file=sys.stderr)
+                    sys.exit(1)
             return
 
         if not x and spec.get('columns'):
@@ -173,25 +178,34 @@ def _run_wave_pg(files, x, sheet, pivot_spec=None,
     if pivot_spec:
         from .analysis import preprocess_dataframe, run_analysis_steps
         for f in files:
-            wf = WaveFile(f, x or "", fmt=fmt)
-            raw = wf.df.copy()
-            a_block = (spec.get("analysis") or {})
-            raw = preprocess_dataframe(raw, a_block.get("preprocess", {}))
-            pivoted = apply_pivot(raw, spec)
-            if a_block.get("steps"):
-                ar = run_analysis_steps(
-                    pivoted, a_block["steps"],
-                    x_column=spec.get("columns"))
-                summary_text = ar.summary_text
-                if export_path and summary_text.strip():
-                    print(summary_text)
-            name = "pivot(%s)" % os.path.basename(f)
-            c.openDataFrame(pivoted, name,
-                            pivot_spec_path=os.path.abspath(pivot_spec),
-                            original_path=os.path.abspath(f))
+            try:
+                wf = WaveFile(f, x or "", fmt=fmt)
+                raw = wf.df.copy()
+                a_block = (spec.get("analysis") or {})
+                raw = preprocess_dataframe(raw, a_block.get("preprocess", {}))
+                pivoted = apply_pivot(raw, spec)
+                if a_block.get("steps"):
+                    ar = run_analysis_steps(
+                        pivoted, a_block["steps"],
+                        x_column=spec.get("columns"))
+                    summary_text = ar.summary_text
+                    if export_path and summary_text.strip():
+                        print(summary_text)
+                name = "pivot(%s)" % os.path.basename(f)
+                c.openDataFrame(
+                    pivoted, name,
+                    pivot_spec_path=os.path.abspath(pivot_spec),
+                    original_path=f if _URL_RE.match(f) else os.path.abspath(f))
+            except Exception as e:
+                print("error: failed to load %s: %s" % (f, e), file=sys.stderr)
+                sys.exit(1)
     else:
         for f in files:
-            c.openFile(f, sheet_name=sheet, fmt=fmt)
+            try:
+                c.openFile(f, sheet_name=sheet, fmt=fmt)
+            except Exception as e:
+                print("error: failed to load %s: %s" % (f, e), file=sys.stderr)
+                sys.exit(1)
 
     if export_path and pivot_spec:
         c.win._pending_export_metrics = summary_text or ""

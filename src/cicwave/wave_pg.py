@@ -3289,10 +3289,14 @@ class PgWaveWindow(QMainWindow):
             return
         event.acceptProposedAction()
         for path in paths:
-            if path.lower().endswith('.cicwave.yaml'):
-                self.applySession(path)
-            else:
-                self.browser.openFile(path)
+            try:
+                if path.lower().endswith('.cicwave.yaml'):
+                    self.applySession(path)
+                else:
+                    self.browser.openFile(path)
+            except Exception as e:
+                QMessageBox.critical(
+                    self, "Open File", "Failed to load %s:\n%s" % (path, e))
 
     def _setup_menus(self):
         mb = self.menuBar()
@@ -3508,7 +3512,11 @@ class PgWaveWindow(QMainWindow):
             self, "Open File", os.getcwd(),
             "All Supported (*.raw *.vcd *.csv *.tsv *.txt *.xlsx *.xls *.ods *.pkl *.pickle *.json *.parquet *.feather *.npz *.h5 *.hdf5);;Raw Files (*.raw);;VCD Files (*.vcd);;CSV/TSV (*.csv *.tsv *.txt);;Excel (*.xlsx *.xls *.ods);;Pickle (*.pkl *.pickle);;JSON (*.json);;Parquet (*.parquet);;Feather (*.feather);;NumPy (*.npz);;HDF5 (*.h5 *.hdf5);;All Files (*)")
         if fname:
-            self.browser.openFile(fname)
+            try:
+                self.browser.openFile(fname)
+            except Exception as e:
+                QMessageBox.critical(
+                    self, "Open File", "Failed to load %s:\n%s" % (fname, e))
 
     def _export_pdf(self):
         p = self._current()
@@ -3779,6 +3787,8 @@ class PgWaveWindow(QMainWindow):
             pivot_path = getattr(wf, '_pivot_spec_path', None)
             if pivot_path:
                 entry['pivot'] = pivot_path
+            if getattr(wf, 'fmt', None):
+                entry['format'] = wf.fmt
             files.append(entry)
             wf_to_idx[id(wf)] = idx
 
@@ -3851,24 +3861,34 @@ class PgWaveWindow(QMainWindow):
             fpath = fe['path']
             if not _is_url(fpath) and not os.path.isabs(fpath):
                 fpath = os.path.normpath(os.path.join(session_dir, fpath))
+            fmt = fe.get('format')
             pivot_path = fe.get('pivot')
             if pivot_path and not os.path.isabs(pivot_path):
                 pivot_path = os.path.normpath(
                     os.path.join(session_dir, pivot_path))
 
-            if pivot_path:
-                from .pivot import load_spec, apply_pivot
-                from .wavefiles import WaveFile
-                spec = load_spec(pivot_path)
-                xaxis = self.browser.xaxis or spec.get('columns', '')
-                if not self.browser.xaxis and spec.get('columns'):
-                    self.browser.xaxis = spec['columns']
-                wf = WaveFile(fpath, xaxis)
-                pivoted = apply_pivot(wf.df, spec)
-                name = "pivot(%s)" % os.path.basename(fpath)
-                self.browser.openDataFrame(pivoted, name)
-            else:
-                self.browser.openFile(fpath)
+            try:
+                if pivot_path:
+                    from .pivot import load_spec, apply_pivot
+                    from .wavefiles import WaveFile
+                    spec = load_spec(pivot_path)
+                    xaxis = self.browser.xaxis or spec.get('columns', '')
+                    if not self.browser.xaxis and spec.get('columns'):
+                        self.browser.xaxis = spec['columns']
+                    wf = WaveFile(fpath, xaxis, fmt=fmt)
+                    pivoted = apply_pivot(wf.df, spec)
+                    name = "pivot(%s)" % os.path.basename(fpath)
+                    self.browser.openDataFrame(
+                        pivoted, name,
+                        pivot_spec_path=os.path.abspath(pivot_path),
+                        original_path=(fpath if _is_url(fpath)
+                                       else os.path.abspath(fpath)))
+                else:
+                    self.browser.openFile(fpath, fmt=fmt)
+            except Exception as e:
+                QMessageBox.critical(
+                    self, "Open File",
+                    "Failed to load %s:\n%s" % (fpath, e))
 
         for pd in session.get('plots', []):
             tab_idx = self.tab_widget.count() - 1

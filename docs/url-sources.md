@@ -86,8 +86,17 @@ and inspect the file locally first if you trust the source.
 - Downloads are capped at 200 MB and a 30 second timeout, so a
   misbehaving or huge endpoint fails fast with a clear error instead
   of hanging or exhausting memory.
-- Network and HTTP errors (DNS failure, timeout, 404, ...) raise a
-  readable error message rather than a raw exception traceback.
+- Network and HTTP errors (DNS failure, timeout, 404, ...) produce a
+  clear one-line error — `error: failed to load <url>: ...` on the
+  CLI, a dialog in the GUI — instead of a raw exception traceback.
+- Any hostname that resolves to a **link-local address**
+  (`169.254.0.0/16` — this is where AWS/GCP/Azure/OpenStack all serve
+  cloud instance-metadata, including credentials) is refused before a
+  request is made. This matters because a URL can arrive indirectly,
+  via a [session file](/cicwave/sessions) or `--pivot` spec someone
+  else wrote — opening one shouldn't be able to make your machine read
+  its own cloud credentials. Ordinary internal REST APIs on RFC1918
+  private ranges (`10.0.0.0/8`, `192.168.0.0/16`, ...) are unaffected.
 
 ## Pivoting a URL source
 

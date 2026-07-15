@@ -20,6 +20,12 @@ class TestDecodeTwos(unittest.TestCase):
         with self.assertRaises(ValueError):
             analysis.decode_twos_complement(np.array([0]), 0)
 
+    def test_nan_passes_through_instead_of_becoming_zero(self):
+        x = np.array([1.0, 2.0, np.nan, 3.0])
+        y = analysis.decode_twos_complement(x, 12)
+        np.testing.assert_array_almost_equal(y[[0, 1, 3]], [1.0, 2.0, 3.0])
+        self.assertTrue(math.isnan(y[2]))
+
 
 class TestRms(unittest.TestCase):
     def test_basic(self):

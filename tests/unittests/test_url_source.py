@@ -6,7 +6,7 @@ import json
 import threading
 import unittest
 
-from cicwave.wavefiles import WaveFile, _is_url
+from cicwave.wavefiles import WaveFile, _is_url, _check_not_link_local
 
 
 class _Handler(http.server.BaseHTTPRequestHandler):
@@ -106,6 +106,32 @@ class TestUrlSource(unittest.TestCase):
         df2 = wf.df
         self.assertIs(df1, df2)
         self.assertEqual(id(wf._remote_bytes), raw_bytes_id)
+
+
+class TestLinkLocalBlocked(unittest.TestCase):
+    """Cloud metadata endpoints (169.254.169.254 and friends) must never
+    be reachable via a URL loaded from a shared session/pivot file."""
+
+    def test_cloud_metadata_ip_is_blocked(self):
+        with self.assertRaises(ValueError) as cm:
+            _check_not_link_local("http://169.254.169.254/latest/meta-data/")
+        self.assertIn("link-local", str(cm.exception))
+
+    def test_link_local_range_is_blocked(self):
+        with self.assertRaises(ValueError):
+            _check_not_link_local("http://169.254.1.2/data.csv")
+
+    def test_wavefile_refuses_link_local_url(self):
+        with self.assertRaises(ValueError) as cm:
+            WaveFile("http://169.254.169.254/latest/meta-data/", xaxis="x")
+        self.assertIn("link-local", str(cm.exception))
+
+    def test_loopback_and_private_ranges_not_blocked(self):
+        # Only link-local is refused; RFC1918 / loopback are legitimate
+        # for internal REST APIs and local test servers.
+        _check_not_link_local("http://127.0.0.1:9999/data.csv")
+        _check_not_link_local("http://10.0.0.5/data.csv")
+        _check_not_link_local("http://192.168.1.1/data.csv")
 
 
 if __name__ == "__main__":

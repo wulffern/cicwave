@@ -28,8 +28,10 @@
 
 import csv as _csv_mod
 import io as _io
+import ipaddress
 import os
 import re
+import socket
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -73,12 +75,44 @@ _CONTENT_TYPE_EXT = {
 }
 
 
+def _check_not_link_local(url):
+    """Refuse a URL that resolves to a link-local address.
+
+    169.254.0.0/16 (and IPv6 fe80::/10) covers the cloud-metadata
+    endpoints (AWS/GCP/Azure/OpenStack all use 169.254.169.254) that a
+    malicious or careless session/pivot file could point at to read
+    instance credentials via a `.cicwave.yaml` someone opens without
+    knowing it references a URL. Ordinary REST APIs and internal
+    services never live on a link-local address, so this has no
+    legitimate false-positive case; it does not touch RFC1918 private
+    ranges, which are a real use case for internal APIs.
+    """
+    host = urllib.parse.urlsplit(url).hostname
+    if not host:
+        return
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror as e:
+        raise ValueError("failed to resolve %s: %s" % (host, e)) from e
+    for info in infos:
+        addr = info[4][0]
+        try:
+            ip = ipaddress.ip_address(addr)
+        except ValueError:
+            continue
+        if ip.is_link_local:
+            raise ValueError(
+                "refusing to fetch %s: %s resolves to link-local address "
+                "%s (cloud metadata endpoints live here)" % (url, host, ip))
+
+
 def _fetch_url(url, timeout=_URL_TIMEOUT_S, max_bytes=_URL_MAX_BYTES):
     """Fetch *url* into memory. Returns ``(bytes, content_type_or_None)``.
 
     Raises :class:`ValueError` with a readable message on network/HTTP
     errors instead of leaking urllib's exception types up to the UI.
     """
+    _check_not_link_local(url)
     req = urllib.request.Request(url, headers={"User-Agent": "cicwave"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -681,10 +715,8 @@ class WaveFile():
 
     @classmethod
     def _twos_skip_columns(cls):
-        return frozenset((
-            "time", "Time [s]", "frequency", "temp-sweep",
-            "v(v-sweep)", "i(i-sweep)",
-        ))
+        from .analysis import DEFAULT_TWOS_SKIP_COLUMNS
+        return DEFAULT_TWOS_SKIP_COLUMNS
 
     def _apply_twos_decode_df(self, df):
         if self.twos_width is None:

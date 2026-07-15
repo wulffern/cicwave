@@ -44,6 +44,8 @@ files:
   - path: ../data/tran.raw           # path to data file (required)
   - path: ../data/measurements.csv
     pivot: ../specs/pivot_spec.yaml   # optional pivot spec for this file
+  - path: https://api.example.com/v1/measurements   # URL sources work too
+    format: json                      # only needed for extension-less URLs
 
 plots:
   - name: "Transient"                # tab name
@@ -75,8 +77,9 @@ plots:
 
 | Key | Required | Description |
 |-----|----------|-------------|
-| `path` | yes | Path to the data file (relative to session file or absolute) |
+| `path` | yes | Path to the data file (relative to session file or absolute), or an `http(s)://` URL — see [URL sources](/cicwave/url-sources) |
 | `pivot` | no | Path to a pivot spec YAML/JSON file to reshape this file before viewing |
+| `format` | no | Forces the format for a URL `path` with no recognizable extension — same as CLI `--format` |
 
 **`plots`** — list of plot tabs:
 
