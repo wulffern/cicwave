@@ -117,11 +117,24 @@ cicwave data.xlsx --sheet "Sheet2"
 
 ## Exporting without the GUI
 
-Export a plot straight to a file — useful in scripts and CI:
+Export a plot image straight to a file — useful in scripts and CI:
 
 ```bash
 cicwave --session mysession.cicwave.yaml --export plot.pdf
 ```
+
+Export the plotted **data** instead of (or alongside) the image — one
+column per (X, Y) pair, format from the extension (`.csv`, `.tsv`,
+`.parquet`, `.feather`, `.h5`):
+
+```bash
+cicwave --session mysession.cicwave.yaml --export-data plot.csv
+cicwave --session mysession.cicwave.yaml --export plot.pdf --export-data plot.csv
+```
+
+This is the same code path as the GUI's **File → Export Data...**, so a
+CI job gets the actual processed numbers (pivoted, two's-complement
+decoded, ...), not just a picture of them.
 
 See [Sessions](/cicwave/sessions) for the session file format.
 

@@ -741,6 +741,15 @@ def run_analysis_steps(
       (``dofftsd.m`` in-band noise), ``exclude_harmonics``, ``sigma_delta_lobe``,
       ``fmin``, ``fmax``, ``remove_dc``.
     - ``rms``: ``column``.
+    - ``adc_psd``: ``y_column``, ``fs``; same optional keys as GUI's ADC
+      PSD dialog (``f0``, ``max_harmonics``, ``osr``, ``exclude_harmonics``,
+      ``dbfs_amplitude``, ``filterwidth``, ``fund_filterwidth``,
+      ``remove_dc``). Reports SNR/SNDR/ENOB/SFDR and each harmonic level.
+    - ``linear_fit``: ``y_column``; ``x_column`` optional (defaults to
+      the pivot spec's ``columns`` x-axis).
+    - ``difference``: ``a_column``, ``b_column`` — element-wise
+      ``a - b`` after trimming to the shorter length; reports mean/RMS/
+      max-abs of the difference.
     """
     import pandas as pd
 
@@ -783,6 +792,57 @@ def run_analysis_steps(
             col = step["column"]
             val = rms(df[col].to_numpy())
             lines.append("[%s] RMS=%.6g" % (col, val))
+        elif st == "adc_psd":
+            yc = step["y_column"]
+            fs = float(step["fs"])
+            f0_raw = step.get("f0")
+            f0_opt = float(f0_raw) if f0_raw is not None else None
+            dbfs = step.get("dbfs_amplitude")
+            dbfs = float(dbfs) if dbfs is not None else None
+            excl = step.get("exclude_harmonics", True)
+            y = df[yc].to_numpy(dtype=np.float64)
+            x = (df[x_column].to_numpy() if x_column and x_column in df.columns
+                 else None)
+            res = adc_psd_analysis(
+                x if x is not None else np.arange(len(y)), y, fs=fs,
+                f0=f0_opt, remove_dc=bool(step.get("remove_dc", True)),
+                filterwidth=int(step.get("filterwidth", 3)),
+                fund_filterwidth=step.get("fund_filterwidth"),
+                max_harmonics=int(step.get("max_harmonics", 5)),
+                osr=float(step.get("osr", 1.0)),
+                exclude_harmonics=bool(excl),
+                dbfs_amplitude=dbfs)
+            lines.append(
+                "[%s]  f0=%.6g Hz  SNR=%.2f dB  SNDR=%.2f dB  ENOB=%.2f "
+                "bits  SFDR=%.2f dBc"
+                % (yc, res.fundamental_hz, res.dynamic.snr_db,
+                   res.dynamic.sndr_db, res.dynamic.enob, res.sfdr_db))
+            for h in res.harmonics:
+                lines.append(
+                    "  H%d: %.2f dBc (peak %.2f dBc)"
+                    % (h.order, h.power_dbc, h.peak_dbc))
+        elif st == "linear_fit":
+            yc = step["y_column"]
+            xc = step.get("x_column") or x_column
+            if not xc or xc not in df.columns:
+                raise KeyError(
+                    "linear_fit step needs 'x_column' (or a pivot "
+                    "spec 'columns' x-axis)")
+            res = linear_fit(df[xc].to_numpy(), df[yc].to_numpy())
+            lines.append(
+                "[%s vs %s]  slope=%.6g  intercept=%.6g  r=%.4f  r^2=%.4f"
+                % (yc, xc, res.slope, res.intercept, res.r, res.r_squared))
+        elif st == "difference":
+            ac = step["a_column"]
+            bc = step["b_column"]
+            d = difference(df[ac].to_numpy(), df[bc].to_numpy())
+            if len(d) == 0:
+                lines.append("[%s - %s] no overlapping samples" % (ac, bc))
+            else:
+                lines.append(
+                    "[%s - %s]  mean=%.6g  rms=%.6g  max_abs=%.6g"
+                    % (ac, bc, float(np.mean(d)), rms(d),
+                       float(np.max(np.abs(d)))))
         else:
             lines.append("(unknown step type %r at index %d)" % (st, i))
 

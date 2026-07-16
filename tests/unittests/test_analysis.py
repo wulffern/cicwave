@@ -242,6 +242,59 @@ class TestRunAnalysisSteps(unittest.TestCase):
         )
         self.assertIn("f0=", out_auto.summary_text)
 
+    def test_adc_psd_step(self):
+        fs = 1e6
+        n = 4096
+        t = np.arange(n) / fs
+        f0 = 50e3
+        # Fundamental plus a 2nd harmonic at a known, fixed ratio.
+        y = 0.5 * np.sin(2 * np.pi * f0 * t) + 0.01 * np.sin(4 * np.pi * f0 * t)
+        df = pd.DataFrame({"time": t, "adc_out": y})
+        out = analysis.run_analysis_steps(
+            df, [{"type": "adc_psd", "y_column": "adc_out", "fs": fs,
+                  "max_harmonics": 2}],
+            x_column="time")
+        self.assertIn("SNDR=", out.summary_text)
+        self.assertIn("SFDR=", out.summary_text)
+        self.assertIn("H2:", out.summary_text)
+        # 0.01/0.5 amplitude ratio -> ~-34 dBc for the 2nd harmonic.
+        self.assertRegex(out.summary_text, r"H2: -3[0-9]\.\d+ dBc")
+
+    def test_linear_fit_step(self):
+        x = np.linspace(0, 10, 50)
+        y = 2.0 * x + 3.0
+        df = pd.DataFrame({"x": x, "y": y})
+        out = analysis.run_analysis_steps(
+            df, [{"type": "linear_fit", "x_column": "x", "y_column": "y"}])
+        self.assertIn("slope=2", out.summary_text)
+        self.assertIn("r^2=1.0000", out.summary_text)
+
+    def test_linear_fit_step_uses_pivot_x_column_by_default(self):
+        x = np.linspace(0, 5, 20)
+        y = -1.0 * x + 7.0
+        df = pd.DataFrame({"freq": x, "gain": y})
+        out = analysis.run_analysis_steps(
+            df, [{"type": "linear_fit", "y_column": "gain"}],
+            x_column="freq")
+        self.assertIn("slope=-1", out.summary_text)
+
+    def test_linear_fit_step_without_x_column_raises(self):
+        df = pd.DataFrame({"y": [1.0, 2.0, 3.0]})
+        with self.assertRaises(KeyError):
+            analysis.run_analysis_steps(
+                df, [{"type": "linear_fit", "y_column": "y"}])
+
+    def test_difference_step(self):
+        df = pd.DataFrame({
+            "a": [1.0, 2.0, 3.0, 4.0],
+            "b": [1.0, 1.0, 1.0, 1.0],
+        })
+        out = analysis.run_analysis_steps(
+            df, [{"type": "difference", "a_column": "a", "b_column": "b"}])
+        self.assertIn("[a - b]", out.summary_text)
+        self.assertIn("mean=1.5", out.summary_text)
+        self.assertIn("max_abs=3", out.summary_text)
+
 
 class TestPreprocessDataframe(unittest.TestCase):
     def test_twos_columns(self):

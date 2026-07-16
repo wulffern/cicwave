@@ -39,12 +39,14 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Visualization",
 ]
 
-[project.optional-dependencies]  
+[project.optional-dependencies]
 parquet = ["pyarrow"]     # Parquet file support
 hdf5 = ["tables"]         # HDF5 file support
+mcp = ["mcp[cli]"]        # MCP server (cicwave-mcp); requires Python >= 3.10
 
 [project.scripts]
 cicwave = "cicwave.cli:main"
+cicwave-mcp = "cicwave.mcp_server:main"
 
 [project.gui-scripts]  
 cicwavew = "cicwave.cli:main"  # Windows no-console wrapper
