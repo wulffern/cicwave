@@ -42,6 +42,7 @@ in gzip decompression or in pandas itself), so this is where the
 actual wins are, well before reaching for a compiled extension.
 """
 
+import array
 import gzip
 import struct
 
@@ -129,16 +130,22 @@ def toDataFrame(fname):
     site_to_index = {}
     site_to_indices = {}
 
+    #- Numeric columns accumulate into array.array rather than list:
+    #- a Python list of N rows means N individually boxed int/float
+    #- objects (~28 bytes each) until pandas converts them; array.array
+    #- packs them at their native C width (matching each field's STDF
+    #- type) the whole time, which matters once N reaches the millions
+    #- of rows real production STDF files have.
     part_ids = []
-    site_nums = []
-    test_nums = []
+    site_nums = array.array('B')
+    test_nums = array.array('I')
     test_txts = []
-    results = []
+    results = array.array('f')
     units_col = []
-    lo_limits = []
-    hi_limits = []
-    res_scals = []
-    test_flgs = []
+    lo_limits = array.array('f')
+    hi_limits = array.array('f')
+    res_scals = array.array('b')
+    test_flgs = array.array('B')
 
     with _open_maybe_gzip(fname) as fh:
         data = fh.read()
@@ -162,6 +169,15 @@ def toDataFrame(fname):
     s_ptr_mid = struct.Struct(order + 'Bbbb')
     s_ptr_lim = struct.Struct(order + 'ff')
 
+    #- TEST_TXT/UNITS are decoded fresh on every PTR, but in a real
+    #- file with N parts x M tests there are only ~M distinct values,
+    #- repeated N times each -- e.g. 20,000 parts x 1,000 params is 20M
+    #- rows sharing ~1,000 distinct test names. A per-parse dedup cache
+    #- (not sys.intern, which would leak across files for the life of
+    #- a long-running process like the MCP server) collapses those back
+    #- down to one string object per distinct value.
+    str_cache = {}
+
     pos = 0
     while pos + 4 <= total:
         rec_len = s_len.unpack_from(data, pos)[0]
@@ -184,6 +200,7 @@ def toDataFrame(fname):
                 p = end
 
             test_txt, p = _fast_cn(data, p, end)
+            test_txt = str_cache.setdefault(test_txt, test_txt)
             _alarm_id, p = _fast_cn(data, p, end)
 
             if p + s_ptr_mid.size <= end:
@@ -202,6 +219,7 @@ def toDataFrame(fname):
                 p = end
 
             units, p = _fast_cn(data, p, end)
+            units = str_cache.setdefault(units, units)
 
             part_id = site_to_part_id.get(site)
             if not part_id:
@@ -249,16 +267,21 @@ def toDataFrame(fname):
 
         pos = end
 
+    #- pd.DataFrame() upcasts a bare array.array to the platform-default
+    #- int64/float64 the same as it would a plain list, silently
+    #- throwing away the point of accumulating into narrower typecodes
+    #- above -- wrapping each in np.asarray(dtype=...) first is what
+    #- actually gets pandas to keep the native STDF field width.
     df = pd.DataFrame({
         'part_id': part_ids,
-        'site_num': site_nums,
-        'test_num': test_nums,
+        'site_num': np.asarray(site_nums, dtype=np.uint8),
+        'test_num': np.asarray(test_nums, dtype=np.uint32),
         'test_txt': test_txts,
         'result': np.asarray(results, dtype=np.float64),
         'units': units_col,
-        'lo_limit': lo_limits,
-        'hi_limit': hi_limits,
-        'res_scal': res_scals,
-        'test_flg': test_flgs,
+        'lo_limit': np.asarray(lo_limits, dtype=np.float64),
+        'hi_limit': np.asarray(hi_limits, dtype=np.float64),
+        'res_scal': np.asarray(res_scals, dtype=np.int8),
+        'test_flg': np.asarray(test_flgs, dtype=np.uint8),
     }, columns=_COLUMNS)
     return df
