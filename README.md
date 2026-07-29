@@ -39,6 +39,7 @@ repo. As such, you're here.
   - Pickle (`.pkl`) for cached DataFrames
   - VCD digital waveforms 
   - LitePoint `.iqvsa` IQ capture files
+  - STDF (`.stdf`, `.stdf.gz`) semiconductor ATE test results
   - Statistical formats: Stata (`.dta`), SAS (`.sas7bdat`), SPSS (`.sav`)
 - **URL data sources**: load CSV/JSON/Excel/Parquet/... straight from an
   `http(s)://` URL — REST APIs, hosted datasets, anything pandas can read
@@ -144,6 +145,7 @@ through to the ngspice raw reader, so non-standard suffixes (e.g. `.raw0`,
 | Whitespace text | `.dat`, `.spe`, `.cou`, `.chi` | Eldo `.cou`/`.chi`, ngspice `.dat`, generic space/tab columns; `#` comments stripped by default |
 | VCD | `.vcd` | Value Change Dump — digital simulation waveforms |
 | LitePoint IQ | `.iqvsa` | LitePoint IQxstream / IQfact IQ capture data |
+| STDF | `.stdf`, `.stdf.gz` | Semiconductor ATE test results (SEMI E10/V4) — parametric (PTR) results per part/site, gzip auto-detected |
 
 ### Tabular text formats
 

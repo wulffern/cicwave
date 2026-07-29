@@ -52,7 +52,7 @@ Usage: cicwave [OPTIONS] [FILES]...
   visualization of simulation data.
 
   Supports: .raw, .csv, .tsv, .xlsx, .json, .parquet, .feather, .npz, .h5,
-  .pkl, .vcd (digital), .iqvsa (LitePoint), and more.
+  .pkl, .vcd (digital), .iqvsa (LitePoint), .stdf (ATE), and more.
 
   URL sources:
     cicwave https://example.com/data.csv    Any http(s) URL works directly

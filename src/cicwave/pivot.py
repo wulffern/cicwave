@@ -247,12 +247,20 @@ def apply_pivot(df, spec):
             "that wasn't intended",
             n_dupes, " and x-value" if has_xaxis else "")
 
+    #- observed=True is explicit (rather than relying on the pandas
+    #- default, which varies by version) so a categorical index/columns
+    #- column -- e.g. STDF's part_id/test_txt -- reshapes to only the
+    #- combinations actually present in `sub`, not the full cross
+    #- product of every category the dtype remembers (older pandas
+    #- defaults to including all of them, which silently balloons the
+    #- result with all-NaN rows/columns for a filtered-down `sub`).
     if has_xaxis:
         result = sub.pivot_table(
             index=columns_col,
             columns='_wave',
             values=values_col,
             aggfunc='mean',
+            observed=True,
         )
         result.columns.name = None
         result = result.reset_index()
@@ -268,6 +276,7 @@ def apply_pivot(df, spec):
             columns=index_col,
             values=values_col,
             aggfunc='mean',
+            observed=True,
         )
         result.columns.name = None
         result = result.reset_index().rename(columns={'_wave': 'condition'})

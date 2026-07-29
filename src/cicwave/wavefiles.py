@@ -40,6 +40,7 @@ import pandas as pd
 from matplotlib.ticker import EngFormatter
 
 from .ngraw import toDataFrame as _ngraw_toDataFrame
+from .stdf import toDataFrame as _stdf_toDataFrame
 
 
 # ---------------------------------------------------------------------------
@@ -424,7 +425,7 @@ class WaveFile():
     #- porting to an in-memory buffer yet — not realistic REST payloads
     #- anyway (lab-instrument formats, not climate/health datasets).
     _REMOTE_UNSUPPORTED_EXTS = {
-        '.raw', '.vcd', '.iqvsa', '.prn', '.npz',
+        '.raw', '.vcd', '.iqvsa', '.prn', '.npz', '.stdf',
         '.dat', '.spe', '.cou', '.chi',
         '.stata', '.dta', '.sas7bdat', '.sav',
     }
@@ -593,6 +594,9 @@ class WaveFile():
     def _read_file(self):
         if self._remote:
             return self._apply_twos_decode_df(self._read_remote_file())
+        lower = self.fname.lower()
+        if lower.endswith('.stdf') or lower.endswith('.stdf.gz'):
+            return self._apply_twos_decode_df(_stdf_toDataFrame(self.fname))
         ext = os.path.splitext(self.fname)[1].lower()
         reader = self.PANDAS_READERS.get(ext)
         if reader:

@@ -22,6 +22,7 @@ falls through to the ngspice raw reader, so non-standard suffixes (e.g.
 | Whitespace text | `.dat`, `.spe`, `.cou`, `.chi` | Eldo `.cou`/`.chi`, ngspice `.dat`, generic space/tab columns; `#` comments stripped by default |
 | VCD | `.vcd` | Value Change Dump — digital simulation waveforms |
 | LitePoint IQ | `.iqvsa` | LitePoint IQxstream / IQfact IQ capture data |
+| STDF | `.stdf`, `.stdf.gz` | Semiconductor ATE test results (SEMI E10/V4) — parametric (PTR) results per part/site, gzip auto-detected |
 
 ### Tabular text formats
 

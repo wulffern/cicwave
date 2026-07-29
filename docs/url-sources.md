@@ -65,9 +65,10 @@ they do to local files — see [Usage](/cicwave/usage#csv-options).
 
 **Not supported for URL sources**: ngspice `.raw`, VCD, `.iqvsa`,
 Xyce `.prn`, whitespace formats (`.dat`/`.spe`/`.cou`/`.chi`), `.npz`,
-and the statistical formats (Stata/SAS/SPSS). These are lab-instrument
-or simulator output formats that aren't realistic REST/API payloads;
-download the file locally first if you need to view one.
+STDF (`.stdf`/`.stdf.gz`), and the statistical formats (Stata/SAS/SPSS).
+These are lab-instrument or simulator output formats that aren't
+realistic REST/API payloads; download the file locally first if you
+need to view one.
 
 **Blocked for URL sources**: Pickle (`.pkl`/`.pickle`) and HDF5
 (`.h5`/`.hdf5`). Loading a pickle deserializes arbitrary Python objects,
