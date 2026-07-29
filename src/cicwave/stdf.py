@@ -267,18 +267,30 @@ def toDataFrame(fname):
 
         pos = end
 
+    #- Drop the raw file buffer before building the DataFrame -- it's
+    #- otherwise held alive as a local for the rest of the function,
+    #- including the pd.Categorical() conversions below, which is real
+    #- peak memory (hundreds of MB to low GBs for a large STDF file)
+    #- with no further use once the parse loop above is done.
+    del data
+
     #- pd.DataFrame() upcasts a bare array.array to the platform-default
     #- int64/float64 the same as it would a plain list, silently
     #- throwing away the point of accumulating into narrower typecodes
     #- above -- wrapping each in np.asarray(dtype=...) first is what
     #- actually gets pandas to keep the native STDF field width.
     df = pd.DataFrame({
-        'part_id': part_ids,
+        #- part_id/test_txt/units are low-cardinality relative to row
+        #- count (a 20,000-part x 1,000-test file has ~20,000/~1,000/~1
+        #- distinct values across 20M rows) -- category dtype stores
+        #- the distinct values once plus a compact integer code per
+        #- row, instead of one string reference per row.
+        'part_id': pd.Categorical(part_ids),
         'site_num': np.asarray(site_nums, dtype=np.uint8),
         'test_num': np.asarray(test_nums, dtype=np.uint32),
-        'test_txt': test_txts,
+        'test_txt': pd.Categorical(test_txts),
         'result': np.asarray(results, dtype=np.float64),
-        'units': units_col,
+        'units': pd.Categorical(units_col),
         'lo_limit': np.asarray(lo_limits, dtype=np.float64),
         'hi_limit': np.asarray(hi_limits, dtype=np.float64),
         'res_scal': np.asarray(res_scals, dtype=np.int8),
