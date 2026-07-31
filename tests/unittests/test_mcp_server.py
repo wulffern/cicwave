@@ -140,10 +140,22 @@ class McpProtocolTest(unittest.IsolatedAsyncioTestCase):
         names = {t.name for t in tools}
         self.assertEqual(names, {"plot", "pivot_info", "analyze"})
 
+    @staticmethod
+    def _content(result):
+        """Content blocks from call_tool, across MCP SDK generations.
+
+        SDK 1.x returned either a bare list of content blocks or a
+        ``(content, structured)`` tuple; 2.x returns a ``CallToolResult``
+        object carrying them on ``.content``.
+        """
+        if hasattr(result, "content"):
+            return result.content
+        return result[0] if isinstance(result, tuple) else result
+
     async def test_call_tool_plot_returns_image_content(self):
         result = await mcp.call_tool(
             "plot", {"files": [self.csv], "waves": ["v"], "x": "time"})
-        content = result[0] if isinstance(result, tuple) else result
+        content = self._content(result)
         self.assertTrue(len(content) >= 1)
         self.assertEqual(content[0].type, "image")
 
@@ -151,7 +163,7 @@ class McpProtocolTest(unittest.IsolatedAsyncioTestCase):
         result = await mcp.call_tool(
             "analyze", {"file": self.csv,
                         "steps": [{"type": "rms", "column": "v"}]})
-        content = result[0] if isinstance(result, tuple) else result
+        content = self._content(result)
         self.assertEqual(content[0].type, "text")
         self.assertIn("RMS=", content[0].text)
 

@@ -27,9 +27,27 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import tempfile
 
-from mcp.server.fastmcp import FastMCP, Image
+#- The MCP Python SDK renamed FastMCP to MCPServer in 2.0 and moved it out of
+#- mcp.server.fastmcp. The constructor kwargs, the .tool() decorator, .run()
+#- and Image are otherwise source-compatible, so accept either generation
+#- rather than pinning users to one.
+try:
+    from mcp.server.mcpserver import Image, MCPServer as _Server  # SDK >= 2.0
+except ImportError:  # pragma: no cover - depends on the installed SDK
+    from mcp.server.fastmcp import FastMCP as _Server, Image  # SDK 1.x
 
-mcp = FastMCP(
+import inspect
+
+from . import __version__
+
+#- SDK 2.0 reports a version in the initialize handshake and defaults it to an
+#- empty string, so clients would otherwise see cicwave with no version. SDK 1.x
+#- has no such parameter, hence the signature check rather than a bare kwarg.
+_server_kwargs = {}
+if "version" in inspect.signature(_Server.__init__).parameters:
+    _server_kwargs["version"] = __version__
+
+mcp = _Server(
     "cicwave",
     instructions=(
         "Tools for plotting and analyzing waveform/measurement data "
@@ -40,6 +58,7 @@ mcp = FastMCP(
         "analysis (RMS, SNR/SNDR/ENOB, ADC PSD/SFDR, linear fit, "
         "difference) and returns a text summary."
     ),
+    **_server_kwargs,
 )
 
 

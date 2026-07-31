@@ -24,6 +24,9 @@ own requirement — the rest of cicwave supports 3.8+):
 pip install "cicwave[mcp]"
 ```
 
+Both SDK generations work: 1.x (`FastMCP`) and 2.x, which renamed that
+class to `MCPServer` and moved it out of `mcp.server.fastmcp`.
+
 ## Running it
 
 ```bash
