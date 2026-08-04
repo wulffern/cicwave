@@ -23,6 +23,7 @@ falls through to the ngspice raw reader, so non-standard suffixes (e.g.
 | VCD | `.vcd` | Value Change Dump — digital simulation waveforms |
 | LitePoint IQ | `.iqvsa` | LitePoint IQxstream / IQfact IQ capture data |
 | STDF | `.stdf`, `.stdf.gz` | Semiconductor ATE test results (SEMI E10/V4) — parametric (PTR) results per part/site, gzip auto-detected |
+| Raw counter | `.u32` | Bare little-endian `uint32` counter records with a `.meta.json` sidecar giving the tick length and periods per sample; converted to Hz or ns on load, with the dead time between capture chunks preserved |
 
 ### Tabular text formats
 

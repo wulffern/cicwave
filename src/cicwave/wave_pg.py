@@ -4521,7 +4521,17 @@ class PgWaveWindow(QMainWindow):
             w.pw.getAxis('left').setTicks([ticks])
 
     def autoplot_pivot_for_export(self):
-        """Plot every Y column from the current file so ``--export`` has data."""
+        """Backwards-compatible alias for :meth:`autoplot_for_export`."""
+        return self.autoplot_for_export()
+
+    def autoplot_for_export(self):
+        """Plot every Y column from the current file so ``--export`` has data.
+
+        Nothing is plotted when the viewer merely opens a file - the user
+        picks waves in the GUI - so a headless ``--export`` had nothing to
+        write and quit silently having produced no file. This was reached
+        only for pivots, though it was never pivot-specific.
+        """
         f = self.browser.files.getSelected()
         if f is None:
             return
@@ -4643,6 +4653,23 @@ class CmdWavePg:
         wave data (CSV/TSV/Parquet/Feather/HDF5) via the same code path
         as File > Export Data. Either or both may be given.
         """
+        def _plotted():
+            return [self.win.tab_widget.widget(i)
+                    for i in range(self.win.tab_widget.count())
+                    if isinstance(self.win.tab_widget.widget(i), PgWavePlot)
+                    and self.win.tab_widget.widget(i).wave_data]
+
+        if not _plotted():
+            #- Headless export of a plain file: nothing has been selected, so
+            #- select everything rather than writing no file at all.
+            self.win.autoplot_for_export()
+        if not _plotted():
+            print("Nothing to export: no waves could be plotted from the "
+                  "given file(s). Check --x names a real column.",
+                  file=sys.stderr)
+            self.app.quit()
+            return
+
         for ti in range(self.win.tab_widget.count()):
             widget = self.win.tab_widget.widget(ti)
             if isinstance(widget, PgWavePlot) and widget.wave_data:

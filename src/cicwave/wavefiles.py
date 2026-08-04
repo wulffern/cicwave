@@ -425,7 +425,7 @@ class WaveFile():
     #- porting to an in-memory buffer yet — not realistic REST payloads
     #- anyway (lab-instrument formats, not climate/health datasets).
     _REMOTE_UNSUPPORTED_EXTS = {
-        '.raw', '.vcd', '.iqvsa', '.prn', '.npz', '.stdf',
+        '.raw', '.vcd', '.iqvsa', '.prn', '.npz', '.stdf', '.u32',
         '.dat', '.spe', '.cou', '.chi',
         '.stata', '.dta', '.sas7bdat', '.sav',
     }
@@ -580,6 +580,7 @@ class WaveFile():
         '.parquet': lambda self: pd.read_parquet(self.fname),
         '.feather': lambda self: pd.read_feather(self.fname),
         '.npz':     lambda self: read_npz(self.fname),
+        '.u32':     lambda self: read_u32(self.fname),
         '.h5':      lambda self: pd.read_hdf(self.fname),
         '.hdf5':    lambda self: pd.read_hdf(self.fname),
         '.html':    lambda self: pd.read_html(self.fname)[0],
@@ -1197,6 +1198,134 @@ def read_npz(fname):
     df = _npz_arrays_to_dataframe(arrays)
     _npz_apply_frequency_aliases(df)
     _npz_apply_time_axis(df, fname)
+    return df
+
+
+# ---------------------------------------------------------------------------
+# Raw counter records (.u32) from a PIO reciprocal counter
+# ---------------------------------------------------------------------------
+
+#: Filename components that name a sensor inside a multi-sensor capture, e.g.
+#: ``corr-dual-20260804.gr07.u32``. The sidecar for those drops the component,
+#: so it has to be stripped before looking for the metadata.
+_U32_SENSOR_PARTS = ('gr07', 'gr06', 'index')
+
+
+def _u32_read_sidecar(fname):
+    """Return the ``.meta.json`` describing a ``.u32`` capture, and its role.
+
+    A ``.u32`` file is a bare little-endian ``uint32`` array with no header -
+    it is what a counter pushed, nothing more - so the sidecar is not optional
+    here the way it is for ``.npz``: without it the numbers have no units, no
+    time axis and no meaning. Two layouts are handled:
+
+    ``noise-GR06-<stamp>.u32``       -> ``noise-GR06-<stamp>.meta.json``
+    ``corr-dual-<stamp>.gr07.u32``   -> ``corr-dual-<stamp>.meta.json``
+
+    Returns ``(meta, role)`` where ``role`` is the sensor component from the
+    filename (``'gr07'``/``'gr06'``/``'index'``) or ``None`` for the
+    single-sensor layout.
+    """
+    import json
+
+    base = os.path.splitext(fname)[0]
+    role = None
+    stem, sub = os.path.splitext(base)
+    if sub[1:].lower() in _U32_SENSOR_PARTS:
+        role = sub[1:].lower()
+        base = stem
+    side = base + '.meta.json'
+    if not os.path.exists(side):
+        return None, role
+    try:
+        with open(side, 'r', encoding='utf-8') as fh:
+            meta = json.load(fh)
+    except (OSError, ValueError):
+        return None, role
+    return (meta if isinstance(meta, dict) else None), role
+
+
+def _u32_time_axis(meta, n, key):
+    """Seconds from the start of the run, honouring the gaps between chunks.
+
+    A capture is a sequence of chunks with dead time between them while each is
+    shipped off the board. Laying the samples down as one uniform ramp would
+    quietly close those gaps and stretch the record; instead each chunk starts
+    at its own recorded wall-clock time and is uniform inside itself, which is
+    what actually happened.
+    """
+    chunks = meta.get('chunks') or []
+    if not chunks:
+        return None
+    t0 = chunks[0].get('t_unix')
+    out = []
+    total = 0
+    for c in chunks:
+        cn = int(c.get(key) or c.get('n') or 0)
+        if cn <= 0:
+            continue
+        if total + cn > n:
+            cn = n - total
+            if cn <= 0:
+                break
+        el = float(c.get('elapsed_us') or 0.0) / 1e6
+        start = float(c.get('t_unix', t0)) - float(t0 or 0.0)
+        step = (el / cn) if el > 0 else 0.0
+        out.append(start + np.arange(cn, dtype=np.float64) * step)
+        total += cn
+    if not out:
+        return None
+    t = np.concatenate(out)
+    if t.size < n:                      # a short final chunk, or a truncated file
+        pad = t[-1] + np.arange(1, n - t.size + 1) * (t[-1] - t[-2] if t.size > 1 else 0.0)
+        t = np.concatenate([t, pad])
+    return t[:n]
+
+
+def read_u32(fname):
+    """Load a raw ``uint32`` counter capture into a DataFrame.
+
+    Produced by a PIO reciprocal counter measuring a temperature sensor: the
+    file is the raw tick counts and the sibling ``.meta.json`` says what a tick
+    is worth and how many oscillator periods each count spans. This converts to
+    physical units so the viewer shows kilohertz or nanoseconds rather than
+    counter LSBs, and names the columns with unit suffixes so the axis
+    formatter picks them up.
+    """
+    meta, role = _u32_read_sidecar(fname)
+    ticks = np.fromfile(fname, dtype='<u4')
+    if meta is None:
+        #- Nothing to scale by, so present the counts honestly as counts
+        #- rather than inventing a calibration.
+        return pd.DataFrame({'sample': np.arange(ticks.size, dtype=np.float64),
+                             'counts': ticks.astype(np.float64)})
+
+    sensor = (role or meta.get('sensor') or '').lower()
+    t = ticks.astype(np.float64)
+    if sensor == 'index':
+        #- Alignment bookkeeping, not a measurement: which pulse of the other
+        #- sensor was current when each sample landed.
+        col, values, nkey = 'gr06_pulse_index', t, 'n7'
+    elif sensor == 'gr07':
+        tick_s = float(meta.get('gr07_tick_s') or meta.get('tick_s') or 0.0)
+        per = float(meta.get('gr07_periods_per_sample')
+                    or meta.get('periods_per_sample') or 1.0)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            values = np.where(t > 0, per / np.where(t > 0, t, 1.0) / tick_s, np.nan)
+        col, nkey = 'GR07_rate_Hz', 'n7'
+    elif sensor == 'gr06':
+        tick_s = float(meta.get('gr06_tick_s') or meta.get('tick_s') or 0.0)
+        values = t * tick_s * 1e9
+        col, nkey = 'GR06_width_ns', 'n6'
+    else:
+        col, values, nkey = 'counts', t, 'n'
+
+    df = pd.DataFrame({col: values})
+    time = _u32_time_axis(meta, len(df), nkey)
+    if time is not None:
+        df.insert(0, 'time', time)
+    else:
+        df.insert(0, 'sample', np.arange(len(df), dtype=np.float64))
     return df
 
 

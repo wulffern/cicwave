@@ -40,6 +40,7 @@ repo. As such, you're here.
   - VCD digital waveforms 
   - LitePoint `.iqvsa` IQ capture files
   - STDF (`.stdf`, `.stdf.gz`) semiconductor ATE test results
+  - Raw `uint32` counter captures (`.u32`) with a JSON sidecar
   - Statistical formats: Stata (`.dta`), SAS (`.sas7bdat`), SPSS (`.sav`)
 - **URL data sources**: load CSV/JSON/Excel/Parquet/... straight from an
   `http(s)://` URL — REST APIs, hosted datasets, anything pandas can read
@@ -146,6 +147,7 @@ through to the ngspice raw reader, so non-standard suffixes (e.g. `.raw0`,
 | VCD | `.vcd` | Value Change Dump — digital simulation waveforms |
 | LitePoint IQ | `.iqvsa` | LitePoint IQxstream / IQfact IQ capture data |
 | STDF | `.stdf`, `.stdf.gz` | Semiconductor ATE test results (SEMI E10/V4) — parametric (PTR) results per part/site, gzip auto-detected |
+| Raw counter | `.u32` | Bare little-endian `uint32` counter records with a `.meta.json` sidecar giving the tick length and periods per sample; converted to Hz or ns on load, with the dead time between capture chunks preserved |
 
 ### Tabular text formats
 

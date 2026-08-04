@@ -63,7 +63,7 @@ extension.
 `--csv-sep` and `--csv-comment` apply to remote CSV/TSV the same way
 they do to local files — see [Usage](/cicwave/usage#csv-options).
 
-**Not supported for URL sources**: ngspice `.raw`, VCD, `.iqvsa`,
+**Not supported for URL sources**: ngspice `.raw`, VCD, `.iqvsa`, `.u32`,
 Xyce `.prn`, whitespace formats (`.dat`/`.spe`/`.cou`/`.chi`), `.npz`,
 STDF (`.stdf`/`.stdf.gz`), and the statistical formats (Stata/SAS/SPSS).
 These are lab-instrument or simulator output formats that aren't
