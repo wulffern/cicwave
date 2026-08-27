@@ -44,6 +44,9 @@ repo. As such, you're here.
   - Statistical formats: Stata (`.dta`), SAS (`.sas7bdat`), SPSS (`.sav`)
 - **URL data sources**: load CSV/JSON/Excel/Parquet/... straight from an
   `http(s)://` URL — REST APIs, hosted datasets, anything pandas can read
+- **API data sources**: a pivot spec with a `source:` block fetches its own
+  data from a JSON REST API — nested records, one request per row of
+  another, no data file — see [docs](https://wulffern.github.io/cicwave/api-sources)
 - **Multi-dimensional data pivoting** with YAML specifications
 - **Digital waveform support** with separate analog/digital panes  
 - **Session save/restore** with `.cicwave.yaml` files
@@ -114,6 +117,11 @@ cicwave https://api.example.com/v1/measurements --format json
 **Multi-dimensional data reshaping:**
 ```bash
 cicwave --pivot analysis.yaml dataset.csv
+```
+
+**Fetch from a JSON REST API (spec carries the URL, no data file):**
+```bash
+cicwave measurements.yaml
 ```
 
 **Session management:**
@@ -298,6 +306,7 @@ cicwave/
 │   ├── wavefiles.py    # File I/O and data loading
 │   ├── ngraw.py        # ngspice binary parser  
 │   ├── pivot.py        # Data reshaping
+│   ├── apisource.py    # Declarative JSON REST API data sources
 │   ├── theme.py        # Color themes
 │   └── command.py      # Logging utilities
 ├── tests/unittests/    # Unit test suite

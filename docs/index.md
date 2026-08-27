@@ -64,6 +64,11 @@ Usage: cicwave [OPTIONS] [FILES]...
     --pivot spec.yaml     Reshape data using pivot spec before viewing
     --pivot-info          Print unique values per pivot dimension and exit
 
+  API sources:
+    cicwave api.yaml      A pivot spec with a 'source:' block fetches its
+                           own data from a JSON REST API (no file needed)
+    --pivot api.yaml      Same, spelled out
+
   Session:
     --session plot.cicwave.yaml         Load saved session
     --export plot.pdf                   Export image and exit (no GUI)
@@ -120,6 +125,7 @@ Options:
 - [Usage](/cicwave/usage) — command-line options, basic usage, environment variables
 - [File formats](/cicwave/formats) — supported file formats and automatic unit detection
 - [URL sources](/cicwave/url-sources) — loading data straight from a REST/CSV URL
+- [API sources](/cicwave/api-sources) — a spec that fetches its own data from a JSON REST API
 - [Pivot](/cicwave/pivot) — reshaping long-format data into waveforms
 - [Sessions](/cicwave/sessions) — saving and restoring a viewer state
 - [GUI and analysis](/cicwave/analysis) — keyboard shortcuts, mouse controls, analysis tools

@@ -107,17 +107,23 @@ def _check_not_link_local(url):
                 "%s (cloud metadata endpoints live here)" % (url, host, ip))
 
 
-def _fetch_url(url, timeout=_URL_TIMEOUT_S, max_bytes=_URL_MAX_BYTES):
-    """Fetch *url* into memory. Returns ``(bytes, content_type_or_None)``.
+def fetch_url_bytes(url, headers=None, timeout=_URL_TIMEOUT_S,
+                    max_bytes=_URL_MAX_BYTES):
+    """Fetch *url* into memory. Returns ``(bytes, response_headers)``.
 
-    Raises :class:`ValueError` with a readable message on network/HTTP
-    errors instead of leaking urllib's exception types up to the UI.
+    ``response_headers`` is the :class:`email.message.Message` urllib
+    returns, so a caller can read provenance headers off the response
+    (see :mod:`cicwave.apisource`). Raises :class:`ValueError` with a
+    readable message on network/HTTP errors instead of leaking urllib's
+    exception types up to the UI.
     """
     _check_not_link_local(url)
-    req = urllib.request.Request(url, headers={"User-Agent": "cicwave"})
+    req_headers = {"User-Agent": "cicwave"}
+    req_headers.update(headers or {})
+    req = urllib.request.Request(url, headers=req_headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            content_type = resp.headers.get_content_type()
+            resp_headers = resp.headers
             data = resp.read(max_bytes + 1)
     except urllib.error.HTTPError as e:
         raise ValueError(
@@ -128,7 +134,14 @@ def _fetch_url(url, timeout=_URL_TIMEOUT_S, max_bytes=_URL_MAX_BYTES):
         raise ValueError(
             "%s exceeds the %d MB download limit" %
             (url, max_bytes // (1024 * 1024)))
-    return data, content_type
+    return data, resp_headers
+
+
+def _fetch_url(url, timeout=_URL_TIMEOUT_S, max_bytes=_URL_MAX_BYTES):
+    """Fetch *url* into memory. Returns ``(bytes, content_type_or_None)``."""
+    data, resp_headers = fetch_url_bytes(
+        url, timeout=timeout, max_bytes=max_bytes)
+    return data, resp_headers.get_content_type()
 
 
 #- Sentinel used by ``WaveFile.csv_comment_override`` to distinguish
@@ -603,7 +616,17 @@ class WaveFile():
         if reader:
             df = reader(self)
         else:
+            #- Unknown extensions fall through to the ngspice raw reader,
+            #- which returns None rather than raising when the file holds
+            #- no plots. Say so here: otherwise the None escapes and
+            #- surfaces as "'NoneType' object has no attribute 'columns'"
+            #- somewhere unrelated.
             df = _ngraw_toDataFrame(self.fname)
+            if df is None:
+                raise ValueError(
+                    "could not read %s: no reader is registered for '%s' "
+                    "and it is not an ngspice raw file" % (
+                        os.path.basename(self.fname), ext or "(no extension)"))
         return self._apply_twos_decode_df(df)
 
     def _remote_ext(self):

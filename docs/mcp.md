@@ -62,10 +62,10 @@ Render a plot from one or more data files and return the image inline.
 
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `files` | yes | Local paths or `http(s)://` URLs — see [URL sources](/cicwave/url-sources) |
+| `files` | yes* | Local paths or `http(s)://` URLs — see [URL sources](/cicwave/url-sources). *Omit when `pivot` names a spec that fetches its own data |
 | `waves` | no | Column/signal names to plot. Omit to plot every numeric column of the first file except the x-axis |
 | `x` | no | X-axis column. Omit to auto-detect |
-| `pivot` | no | Path to a [pivot spec](/cicwave/pivot) to reshape long-format data first; `waves` then refers to post-pivot names |
+| `pivot` | no | Path to a [pivot spec](/cicwave/pivot) to reshape long-format data first; `waves` then refers to post-pivot names. A spec with a `source:` block also fetches the data — see [API sources](/cicwave/api-sources) |
 | `title` | no | Plot title |
 | `url_format` | no | Force the format for an extension-less URL |
 
@@ -78,8 +78,8 @@ column names and unique values.
 
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `file` | yes | Local path or URL |
 | `pivot` | yes | Path to the pivot spec |
+| `file` | yes* | Local path or URL. *Omit when the spec has a `source:` block |
 | `url_format` | no | Force the format for an extension-less URL |
 
 ### `analyze`
@@ -91,8 +91,8 @@ directly instead of embedded in a spec file.
 
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `file` | yes | Local path or URL |
 | `steps` | yes | List of step dicts — `rms`, `dynamic_parameters`, `adc_psd`, `linear_fit`, `difference` (see [Pivot](/cicwave/pivot#steps) for each type's keys) |
+| `file` | yes* | Local path or URL. *Omit when `pivot` names a spec with a `source:` block |
 | `pivot` | no | Reshape first, and apply the spec's `analysis.preprocess` block (e.g. two's-complement decode) before running `steps` |
 | `x` | no | X-axis column override |
 | `url_format` | no | Force the format for an extension-less URL |

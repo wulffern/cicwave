@@ -111,6 +111,38 @@ def _expand_glob_patterns(files, patterns):
     return tuple(out)
 
 
+def _is_source_spec_file(path):
+    """True for a YAML/JSON pivot spec that fetches its own data.
+
+    Lets a self-contained spec be passed positionally (``cicwave
+    api.yaml``) instead of as ``--pivot api.yaml`` with no file. Only a
+    ``source:`` block qualifies -- a spec that still needs a data file
+    would be ambiguous with the file itself.
+    """
+    #- Extension check first, so the pandas/Qt import chain behind
+    #- apisource is paid for only when a YAML argument is actually given.
+    if not path.lower().endswith((".yaml", ".yml")):
+        return False
+    from .apisource import is_source_spec_file
+    return is_source_spec_file(path)
+
+
+def _promote_positional_spec(files, pivot_spec):
+    """Move a positional source spec into the ``--pivot`` slot."""
+    specs = [f for f in files if _is_source_spec_file(f)]
+    if not specs:
+        return files, pivot_spec
+    if pivot_spec:
+        print("error: %s already fetches its own data; passing --pivot %s "
+              "as well is ambiguous" % (specs[0], pivot_spec), file=sys.stderr)
+        sys.exit(2)
+    if len(files) > 1:
+        print("error: %s fetches its own data and must be the only argument"
+              % specs[0], file=sys.stderr)
+        sys.exit(2)
+    return (), specs[0]
+
+
 def _run_wave_pg(files, x, sheet, pivot_spec=None,
                  pivot_info_flag=False, session_path=None, export_path=None,
                  export_data_path=None, csv_sep=None, csv_comment=None,
@@ -139,17 +171,33 @@ def _run_wave_pg(files, x, sheet, pivot_spec=None,
                 sys.exit(2)
 
     spec = None
+    sources = ()
     if pivot_spec:
+        from .apisource import has_source, load_flat_frame
         from .pivot import load_spec, pivot_info, apply_pivot
-        from .wavefiles import WaveFile
         spec = load_spec(pivot_spec)
+        from_source = has_source(spec)
+
+        #- A spec that fetches its own data has nothing to read from
+        #- disk; anything positional alongside it is a mistake worth
+        #- naming rather than silently ignoring.
+        if from_source:
+            if files:
+                print("error: %s has a 'source:' block, so it fetches its "
+                      "own data; drop the file argument(s): %s"
+                      % (pivot_spec, ", ".join(files)), file=sys.stderr)
+                sys.exit(2)
+            sources = (pivot_spec,)
+        else:
+            sources = files
 
         if pivot_info_flag:
-            for f in files:
+            for f in sources:
                 try:
-                    wf = WaveFile(f, x or "", fmt=fmt)
+                    df = load_flat_frame(spec, None if from_source else f,
+                                         xaxis=x or "", fmt=fmt)
                     print("--- %s ---" % f)
-                    print(pivot_info(wf.df, spec))
+                    print(pivot_info(df, spec))
                     print()
                 except Exception as e:
                     print("error: failed to load %s: %s" % (f, e),
@@ -177,10 +225,11 @@ def _run_wave_pg(files, x, sheet, pivot_spec=None,
     summary_text = ""
     if pivot_spec:
         from .analysis import preprocess_dataframe, run_analysis_steps
-        for f in files:
+        for f in sources:
             try:
-                wf = WaveFile(f, x or "", fmt=fmt)
-                raw = wf.df.copy()
+                raw = load_flat_frame(
+                    spec, None if from_source else f,
+                    xaxis=x or "", fmt=fmt).copy()
                 a_block = (spec.get("analysis") or {})
                 raw = preprocess_dataframe(raw, a_block.get("preprocess", {}))
                 pivoted = apply_pivot(raw, spec)
@@ -195,7 +244,9 @@ def _run_wave_pg(files, x, sheet, pivot_spec=None,
                 c.openDataFrame(
                     pivoted, name,
                     pivot_spec_path=os.path.abspath(pivot_spec),
-                    original_path=f if _URL_RE.match(f) else os.path.abspath(f))
+                    original_path=(
+                        f if _URL_RE.match(f) else os.path.abspath(f)),
+                    source_spec=from_source)
             except Exception as e:
                 print("error: failed to load %s: %s" % (f, e), file=sys.stderr)
                 sys.exit(1)
@@ -279,6 +330,12 @@ def main(files, globs, x, sheet, fmt, pivot, pivot_info, session, export,
       --pivot-info          Print unique values per pivot dimension and exit
 
     \b
+    API sources:
+      cicwave api.yaml      A pivot spec with a 'source:' block fetches its
+                             own data from a JSON REST API (no file needed)
+      --pivot api.yaml      Same, spelled out
+
+    \b
     Session:
       --session plot.cicwave.yaml         Load saved session
       --export plot.pdf                   Export image and exit (no GUI)
@@ -297,6 +354,7 @@ def main(files, globs, x, sheet, fmt, pivot, pivot_info, session, export,
     setup_logging(color=color, level=level)
 
     files = _expand_glob_patterns(files, globs)
+    files, pivot = _promote_positional_spec(files, pivot)
     _run_wave_pg(files, x, sheet, pivot, pivot_info, session, export,
                  export_data_path=export_data, csv_sep=csv_sep,
                  csv_comment=csv_comment, twos_bits=twos_bits,

@@ -806,12 +806,15 @@ class PgWaveBrowser(QWidget):
         self._fill_waves()
 
     def openDataFrame(self, df, name, pivot_spec_path=None,
-                       original_path=None):
+                       original_path=None, source_spec=False):
         f = self.files.openDataFrame(df, name, self.xaxis)
         if pivot_spec_path:
             f._pivot_spec_path = pivot_spec_path
         if original_path:
             f._original_path = original_path
+        #- The spec fetched the data itself, so a saved session has to
+        #- point back at the spec rather than at a file that never existed.
+        f._from_source_spec = bool(source_spec)
         key = self.files.current
         item = QTreeWidgetItem([f.name])
         item.setData(0, Qt.UserRole, key)
@@ -3303,13 +3306,44 @@ class PgWaveWindow(QMainWindow):
         event.acceptProposedAction()
         for path in paths:
             try:
-                if path.lower().endswith('.cicwave.yaml'):
-                    self.applySession(path)
-                else:
-                    self.browser.openFile(path)
+                self.openPath(path)
             except Exception as e:
                 QMessageBox.critical(
                     self, "Open File", "Failed to load %s:\n%s" % (path, e))
+
+    def openPath(self, path):
+        """Open whatever *path* is: a session, a spec, or a data file.
+
+        A YAML argument is ambiguous -- it can be a saved session, a
+        pivot spec that fetches its own data, or (rarely) neither -- so
+        the three cases are sorted out here rather than at each of the
+        GUI's entry points.
+        """
+        from .apisource import is_source_spec_file
+
+        if path.lower().endswith('.cicwave.yaml'):
+            self.applySession(path)
+        elif (path.lower().endswith(('.yaml', '.yml'))
+                and is_source_spec_file(path)):
+            self.openSourceSpec(path)
+        else:
+            self.browser.openFile(path)
+
+    def openSourceSpec(self, spec_path):
+        """Fetch and pivot a spec carrying a ``source:`` block."""
+        from .apisource import load_flat_frame
+        from .pivot import apply_pivot, load_spec
+
+        spec = load_spec(spec_path)
+        if not self.browser.xaxis and spec.get('columns'):
+            self.browser.xaxis = spec['columns']
+        xaxis = self.browser.xaxis or spec.get('columns', '')
+        pivoted = apply_pivot(load_flat_frame(spec, None, xaxis=xaxis), spec)
+        self.browser.openDataFrame(
+            pivoted, "pivot(%s)" % os.path.basename(spec_path),
+            pivot_spec_path=os.path.abspath(spec_path),
+            original_path=os.path.abspath(spec_path),
+            source_spec=True)
 
     def _setup_menus(self):
         mb = self.menuBar()
@@ -3523,10 +3557,10 @@ class PgWaveWindow(QMainWindow):
     def _open_file(self):
         fname, _ = QFileDialog.getOpenFileName(
             self, "Open File", os.getcwd(),
-            "All Supported (*.raw *.vcd *.csv *.tsv *.txt *.xlsx *.xls *.ods *.pkl *.pickle *.json *.parquet *.feather *.npz *.h5 *.hdf5);;Raw Files (*.raw);;VCD Files (*.vcd);;CSV/TSV (*.csv *.tsv *.txt);;Excel (*.xlsx *.xls *.ods);;Pickle (*.pkl *.pickle);;JSON (*.json);;Parquet (*.parquet);;Feather (*.feather);;NumPy (*.npz);;HDF5 (*.h5 *.hdf5);;All Files (*)")
+            "All Supported (*.raw *.vcd *.csv *.tsv *.txt *.xlsx *.xls *.ods *.pkl *.pickle *.json *.parquet *.feather *.npz *.h5 *.hdf5 *.yaml *.yml);;Raw Files (*.raw);;VCD Files (*.vcd);;CSV/TSV (*.csv *.tsv *.txt);;Excel (*.xlsx *.xls *.ods);;Pickle (*.pkl *.pickle);;JSON (*.json);;Parquet (*.parquet);;Feather (*.feather);;NumPy (*.npz);;HDF5 (*.h5 *.hdf5);;Specs and sessions (*.yaml *.yml);;All Files (*)")
         if fname:
             try:
-                self.browser.openFile(fname)
+                self.openPath(fname)
             except Exception as e:
                 QMessageBox.critical(
                     self, "Open File", "Failed to load %s:\n%s" % (fname, e))
@@ -3796,8 +3830,12 @@ class PgWaveWindow(QMainWindow):
         for fkey, wf in self.browser.files.items():
             idx = len(files)
             orig = getattr(wf, '_original_path', None) or wf.fname
-            entry = {'path': orig if _is_url(orig) else os.path.abspath(orig)}
             pivot_path = getattr(wf, '_pivot_spec_path', None)
+            if getattr(wf, '_from_source_spec', False) and pivot_path:
+                files.append({'source': pivot_path})
+                wf_to_idx[id(wf)] = idx
+                continue
+            entry = {'path': orig if _is_url(orig) else os.path.abspath(orig)}
             if pivot_path:
                 entry['pivot'] = pivot_path
             if getattr(wf, 'fmt', None):
@@ -3896,31 +3934,37 @@ class PgWaveWindow(QMainWindow):
         session_dir = os.path.dirname(os.path.abspath(session_path))
 
         for fe in session.get('files', []):
-            fpath = fe['path']
+            #- ``source:`` names a pivot spec that fetches its own data,
+            #- so there is no separate ``path:`` to resolve.
+            from_source = 'source' in fe
+            fpath = fe['source'] if from_source else fe['path']
             if not _is_url(fpath) and not os.path.isabs(fpath):
                 fpath = os.path.normpath(os.path.join(session_dir, fpath))
             fmt = fe.get('format')
-            pivot_path = fe.get('pivot')
+            pivot_path = fpath if from_source else fe.get('pivot')
             if pivot_path and not os.path.isabs(pivot_path):
                 pivot_path = os.path.normpath(
                     os.path.join(session_dir, pivot_path))
 
             try:
                 if pivot_path:
+                    from .apisource import load_flat_frame
                     from .pivot import load_spec, apply_pivot
-                    from .wavefiles import WaveFile
                     spec = load_spec(pivot_path)
                     xaxis = self.browser.xaxis or spec.get('columns', '')
                     if not self.browser.xaxis and spec.get('columns'):
                         self.browser.xaxis = spec['columns']
-                    wf = WaveFile(fpath, xaxis, fmt=fmt)
-                    pivoted = apply_pivot(wf.df, spec)
+                    raw = load_flat_frame(
+                        spec, None if from_source else fpath,
+                        xaxis=xaxis, fmt=fmt)
+                    pivoted = apply_pivot(raw, spec)
                     name = "pivot(%s)" % os.path.basename(fpath)
                     self.browser.openDataFrame(
                         pivoted, name,
                         pivot_spec_path=os.path.abspath(pivot_path),
                         original_path=(fpath if _is_url(fpath)
-                                       else os.path.abspath(fpath)))
+                                       else os.path.abspath(fpath)),
+                        source_spec=from_source)
                 else:
                     self.browser.openFile(fpath, fmt=fmt)
             except Exception as e:

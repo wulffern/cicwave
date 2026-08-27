@@ -119,3 +119,11 @@ values: co2         # y-axis
 
 See [Examples](/cicwave/examples#real-world-data-from-a-url) for the
 full worked example with plots.
+
+## When one URL isn't enough
+
+A single URL has to return the whole table. When the rows are nested
+inside a JSON envelope, or spread across endpoints so that listing them
+takes one request and fetching each one takes another, put a `source:`
+block in the pivot spec instead — see [API
+sources](/cicwave/api-sources).

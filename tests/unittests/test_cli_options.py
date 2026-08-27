@@ -13,7 +13,9 @@ from unittest import mock
 from click.testing import CliRunner
 
 import cicwave.cli as cli_mod
-from cicwave.cli import main, _expand_glob_patterns
+from cicwave.cli import (
+    main, _expand_glob_patterns, _promote_positional_spec,
+)
 from cicwave.wavefiles import WaveFile, _UNSET
 
 
@@ -147,6 +149,54 @@ class TestPositionalGlobExpansion(unittest.TestCase):
         url = "https://example.com/data.csv?format=csv&x=1"
         out = _expand_glob_patterns((url,), ())
         self.assertEqual(out, (url,))
+
+
+class TestPositionalSourceSpec(unittest.TestCase):
+    """``cicwave api.yaml`` is shorthand for ``--pivot api.yaml`` when the
+    spec fetches its own data."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="cicwave-spec-")
+        self.spec = os.path.join(self.tmp, "api.yaml")
+        with open(self.spec, "w") as fh:
+            fh.write("source:\n  url: http://127.0.0.1:1/api\n"
+                     "index: a\ncolumns: b\nvalues: c\n")
+        self.plain = os.path.join(self.tmp, "plain.yaml")
+        with open(self.plain, "w") as fh:
+            fh.write("index: a\ncolumns: b\nvalues: c\n")
+        self.data = os.path.join(self.tmp, "data.csv")
+        with open(self.data, "w") as fh:
+            fh.write("b,c\n1,2\n")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_source_spec_is_promoted_to_pivot(self):
+        self.assertEqual(
+            _promote_positional_spec((self.spec,), None), ((), self.spec))
+
+    def test_spec_without_source_is_left_alone(self):
+        # It cannot fetch anything, so it is not a data source; leave it
+        # to fail downstream as an unsupported file rather than guessing.
+        self.assertEqual(
+            _promote_positional_spec((self.plain,), None),
+            ((self.plain,), None))
+
+    def test_source_spec_with_other_files_is_rejected(self):
+        with self.assertRaises(SystemExit) as cm:
+            _promote_positional_spec((self.spec, self.data), None)
+        self.assertEqual(cm.exception.code, 2)
+
+    def test_source_spec_plus_explicit_pivot_is_rejected(self):
+        with self.assertRaises(SystemExit) as cm:
+            _promote_positional_spec((self.spec,), self.plain)
+        self.assertEqual(cm.exception.code, 2)
+
+    def test_data_file_alongside_source_spec_pivot_is_rejected(self):
+        result = _runner().invoke(main, [self.data, "--pivot", self.spec])
+        self.assertEqual(result.exit_code, 2)
+        self.assertIn("source:", result.output)
 
 
 if __name__ == "__main__":

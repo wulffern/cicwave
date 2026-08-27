@@ -18,6 +18,10 @@ Spec format::
       Config:
         c0: "LV"
 
+A spec can also carry a ``source:`` block, in which case it fetches the
+flat frame from a JSON REST API instead of taking a data file; see
+:mod:`cicwave.apisource`.
+
 Optional post-processing and metrics (consumed by the CLI when
 ``--pivot`` is used; see :mod:`cicwave.analysis`)::
 

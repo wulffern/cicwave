@@ -25,6 +25,14 @@ Inspect the available pivot dimensions first:
 cicwave results.csv --pivot spec.yaml --pivot-info
 ```
 
+A spec can also fetch its own data from a JSON REST API instead of
+taking a file, by carrying a `source:` block — see [API
+sources](/cicwave/api-sources):
+
+```bash
+cicwave spec.yaml
+```
+
 ## Pivot spec format
 
 A pivot spec is a YAML (or JSON) file with the following keys:
