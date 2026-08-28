@@ -138,3 +138,62 @@ command above fetches the live dataset.
 run: cicwave --session session_url_mortality.cicwave.yaml --export wave_url_mortality.svg
 output_image: wave_url_mortality.svg
 -->
+
+## Real-world data from a REST API
+
+The examples above all start from a file. A pivot spec can instead carry
+a [`source:` block](/cicwave/api-sources) and fetch its own rows over
+HTTP — no data file anywhere.
+
+### Where a repository's pull requests landed
+
+Data: the [GitHub REST API](https://docs.github.com/en/rest), which
+needs no token for a public repository. This is the shape a `source:`
+block is for — the numbers are not in one response:
+
+- `/repos/{owner}/{repo}/pulls` lists the pull requests, and
+- `/repos/{owner}/{repo}/pulls/{number}/files` has to be called once per
+  pull request to get what each one changed.
+
+`for_each` issues that second request per row of the first, `{number}`
+is filled in from the row, and `merge` carries the pull request number
+onto every file it returns. The result is one table: file, pull
+request, lines added.
+
+([`github_api_spec.yaml`](https://github.com/wulffern/cicwave/blob/main/tests/docs/github_api_spec.yaml),
+[`session_github_api.cicwave.yaml`](https://github.com/wulffern/cicwave/blob/main/tests/docs/session_github_api.cicwave.yaml))
+
+```bash
+cicwave github_api_spec.yaml
+```
+
+<!--cat:
+file: github_api_spec.yaml
+language: yaml
+-->
+
+The session that plots it names the spec under `source:` rather than
+`path:`, since there is no data file to name:
+
+<!--cat:
+file: session_github_api.cicwave.yaml
+language: yaml
+-->
+
+Unlike the snapshots above, an API source only means anything if it
+actually fetches — so for the build the *service* is swapped out rather
+than the data:
+[`render_github_api.py`](https://github.com/wulffern/cicwave/blob/main/tests/docs/render_github_api.py)
+replays a recorded copy of those seven GitHub responses
+(`github_api_snapshot.json`) over localhost and points the committed
+spec at it. Every request in the spec is really issued; only `base_url`
+differs from the command above, which talks to GitHub.
+
+<!--run_image:
+run: python3 render_github_api.py wave_github_api.svg
+output_image: wave_github_api.svg
+-->
+
+Each marker is one pull request touching one module. A module a pull
+request did not touch has no point there, which is why some series are
+dots rather than lines.

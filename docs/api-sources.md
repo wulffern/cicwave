@@ -42,6 +42,11 @@ Everything a `source:` block contains is data, not code: there is no
 expression language to evaluate, so opening someone else's spec fetches
 URLs but cannot run anything.
 
+There is a worked example against a live public API — the GitHub REST
+API, no token needed — on the [examples
+page](/cicwave/examples#where-a-repositorys-pull-requests-landed),
+including the plot it produces.
+
 ## A single request
 
 The short form, for one endpoint whose records sit under a key:

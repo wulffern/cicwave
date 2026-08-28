@@ -12,7 +12,13 @@ Sources:
     https://github.com/owid/co2-data
   - Our World in Data excess mortality dataset (P-scores)
     https://github.com/owid/covid-19-data (public/data/excess_mortality)
+  - The GitHub REST API, for the api-sources example -- recorded as
+    github_api_snapshot.json and replayed by render_github_api.py
 """
+
+import datetime
+import json
+import urllib.parse
 
 import pandas as pd
 
@@ -46,6 +52,76 @@ def fetch_mortality():
     print("wrote mortality_url_snapshot.csv", sub.shape)
 
 
+#- Fields github_api_spec.yaml reads, plus the ones that make a recorded
+#- response recognisable as what the API returned. The full response
+#- carries a `patch` per file -- a megabyte of diff text for a fixture
+#- that only ever reads three numbers.
+_FILE_FIELDS = ("filename", "additions", "deletions", "changes", "status")
+_PULL_FIELDS = ("number", "title", "state")
+
+
+def _trim(payload):
+    """Keep the fields the spec uses; drop the diff text around them."""
+    if not isinstance(payload, list):
+        return payload
+    out = []
+    for rec in payload:
+        if not isinstance(rec, dict):
+            out.append(rec)
+            continue
+        fields = _FILE_FIELDS if "filename" in rec else _PULL_FIELDS
+        out.append({k: rec[k] for k in fields if k in rec})
+    return out
+
+
+def _snapshot_key(url):
+    """Path plus normalised query, so replay does not depend on ordering."""
+    parts = urllib.parse.urlsplit(url)
+    query = urllib.parse.urlencode(
+        sorted(urllib.parse.parse_qsl(parts.query)))
+    return parts.path + ("?" + query if query else "")
+
+
+def fetch_github():
+    """Record every response github_api_spec.yaml asks for.
+
+    Driven through cicwave's own fetcher rather than a hand-written walk
+    of the endpoints, so the snapshot always covers exactly the requests
+    the committed spec issues -- edit the spec and re-run, and the
+    recording follows.
+    """
+    from cicwave import apisource
+    from cicwave.pivot import load_spec
+
+    recorded = {}
+    real = apisource.fetch_url_bytes
+
+    def recording_fetch(url, **kwargs):
+        data, headers = real(url, **kwargs)
+        recorded[_snapshot_key(url)] = _trim(json.loads(data))
+        return data, headers
+
+    apisource.fetch_url_bytes = recording_fetch
+    try:
+        df = apisource.fetch_dataframe(load_spec("github_api_spec.yaml"))
+    finally:
+        apisource.fetch_url_bytes = real
+
+    with open("github_api_snapshot.json", "w") as fh:
+        json.dump({
+            "note": ("Recorded from the live GitHub REST API by "
+                     "fetch_url_snapshots.py; replayed by "
+                     "render_github_api.py so `make docs` stays offline. "
+                     "Per-file `patch` text is dropped."),
+            "fetched": datetime.datetime.now(
+                datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "responses": recorded,
+        }, fh, indent=1, sort_keys=True)
+    print("wrote github_api_snapshot.json",
+          "(%d response(s), %d row(s))" % (len(recorded), len(df)))
+
+
 if __name__ == "__main__":
     fetch_climate()
     fetch_mortality()
+    fetch_github()

@@ -1,0 +1,953 @@
+{
+ "fetched": "2026-08-28T16:06:18Z",
+ "note": "Recorded from the live GitHub REST API by fetch_url_snapshots.py; replayed by render_github_api.py so `make docs` stays offline. Per-file `patch` text is dropped.",
+ "responses": {
+  "/repos/wulffern/cicwave/pulls/2/files?per_page=100": [
+   {
+    "additions": 52,
+    "changes": 52,
+    "deletions": 0,
+    "filename": ".github/workflows/docs.yml",
+    "status": "added"
+   },
+   {
+    "additions": 4,
+    "changes": 4,
+    "deletions": 0,
+    "filename": "README.md",
+    "status": "modified"
+   },
+   {
+    "additions": 27,
+    "changes": 27,
+    "deletions": 0,
+    "filename": "docs/Gemfile",
+    "status": "added"
+   },
+   {
+    "additions": 40,
+    "changes": 40,
+    "deletions": 0,
+    "filename": "docs/_config.yml",
+    "status": "added"
+   },
+   {
+    "additions": 185,
+    "changes": 185,
+    "deletions": 0,
+    "filename": "docs/analysis.md",
+    "status": "added"
+   },
+   {
+    "additions": 7,
+    "changes": 7,
+    "deletions": 0,
+    "filename": "docs/assets/css/style.scss",
+    "status": "added"
+   },
+   {
+    "additions": 84,
+    "changes": 84,
+    "deletions": 0,
+    "filename": "docs/formats.md",
+    "status": "added"
+   },
+   {
+    "additions": 106,
+    "changes": 106,
+    "deletions": 0,
+    "filename": "docs/index.md",
+    "status": "added"
+   },
+   {
+    "additions": 150,
+    "changes": 150,
+    "deletions": 0,
+    "filename": "docs/pivot.md",
+    "status": "added"
+   },
+   {
+    "additions": 106,
+    "changes": 106,
+    "deletions": 0,
+    "filename": "docs/sessions.md",
+    "status": "added"
+   },
+   {
+    "additions": 128,
+    "changes": 128,
+    "deletions": 0,
+    "filename": "docs/usage.md",
+    "status": "added"
+   }
+  ],
+  "/repos/wulffern/cicwave/pulls/3/files?per_page=100": [
+   {
+    "additions": 25,
+    "changes": 25,
+    "deletions": 0,
+    "filename": ".github/workflows/docs.yml",
+    "status": "modified"
+   },
+   {
+    "additions": 6,
+    "changes": 7,
+    "deletions": 1,
+    "filename": ".gitignore",
+    "status": "modified"
+   },
+   {
+    "additions": 4,
+    "changes": 5,
+    "deletions": 1,
+    "filename": "Makefile",
+    "status": "modified"
+   },
+   {
+    "additions": 1900,
+    "changes": 1900,
+    "deletions": 0,
+    "filename": "docs/assets/wave_dual.svg",
+    "status": "added"
+   },
+   {
+    "additions": 1877,
+    "changes": 1877,
+    "deletions": 0,
+    "filename": "docs/assets/wave_multi.svg",
+    "status": "added"
+   },
+   {
+    "additions": 1273,
+    "changes": 1273,
+    "deletions": 0,
+    "filename": "docs/assets/wave_pivot.svg",
+    "status": "added"
+   },
+   {
+    "additions": 1372,
+    "changes": 1372,
+    "deletions": 0,
+    "filename": "docs/assets/wave_single.svg",
+    "status": "added"
+   },
+   {
+    "additions": 93,
+    "changes": 93,
+    "deletions": 0,
+    "filename": "docs/examples.md",
+    "status": "added"
+   },
+   {
+    "additions": 19,
+    "changes": 36,
+    "deletions": 17,
+    "filename": "docs/index.md",
+    "status": "modified"
+   },
+   {
+    "additions": 9,
+    "changes": 11,
+    "deletions": 2,
+    "filename": "docs/pivot.md",
+    "status": "modified"
+   },
+   {
+    "additions": 56,
+    "changes": 56,
+    "deletions": 0,
+    "filename": "docs/usage.md",
+    "status": "modified"
+   },
+   {
+    "additions": 105,
+    "changes": 105,
+    "deletions": 0,
+    "filename": "scripts/gendoc.py",
+    "status": "added"
+   },
+   {
+    "additions": 10,
+    "changes": 10,
+    "deletions": 0,
+    "filename": "tests/docs/Makefile",
+    "status": "added"
+   },
+   {
+    "additions": 66,
+    "changes": 66,
+    "deletions": 0,
+    "filename": "tests/docs/examples.md",
+    "status": "added"
+   },
+   {
+    "additions": 47,
+    "changes": 47,
+    "deletions": 0,
+    "filename": "tests/docs/gen_testdata.py",
+    "status": "added"
+   },
+   {
+    "additions": 52,
+    "changes": 52,
+    "deletions": 0,
+    "filename": "tests/docs/index.md",
+    "status": "added"
+   },
+   {
+    "additions": 123,
+    "changes": 123,
+    "deletions": 0,
+    "filename": "tests/docs/pivot.md",
+    "status": "added"
+   },
+   {
+    "additions": 31,
+    "changes": 31,
+    "deletions": 0,
+    "filename": "tests/docs/pivot_data.csv",
+    "status": "added"
+   },
+   {
+    "additions": 5,
+    "changes": 5,
+    "deletions": 0,
+    "filename": "tests/docs/pivot_spec.yaml",
+    "status": "added"
+   },
+   {
+    "additions": 11,
+    "changes": 11,
+    "deletions": 0,
+    "filename": "tests/docs/session_dual.cicwave.yaml",
+    "status": "added"
+   },
+   {
+    "additions": 14,
+    "changes": 14,
+    "deletions": 0,
+    "filename": "tests/docs/session_multi.cicwave.yaml",
+    "status": "added"
+   },
+   {
+    "additions": 15,
+    "changes": 15,
+    "deletions": 0,
+    "filename": "tests/docs/session_pivot.cicwave.yaml",
+    "status": "added"
+   },
+   {
+    "additions": 8,
+    "changes": 8,
+    "deletions": 0,
+    "filename": "tests/docs/session_single.cicwave.yaml",
+    "status": "added"
+   },
+   {
+    "additions": 2001,
+    "changes": 2001,
+    "deletions": 0,
+    "filename": "tests/docs/test.csv",
+    "status": "added"
+   },
+   {
+    "additions": 128,
+    "changes": 128,
+    "deletions": 0,
+    "filename": "tests/docs/usage.md",
+    "status": "added"
+   }
+  ],
+  "/repos/wulffern/cicwave/pulls/4/files?per_page=100": [
+   {
+    "additions": 10,
+    "changes": 10,
+    "deletions": 0,
+    "filename": "README.md",
+    "status": "modified"
+   },
+   {
+    "additions": 17,
+    "changes": 17,
+    "deletions": 0,
+    "filename": "docs/analysis.md",
+    "status": "modified"
+   },
+   {
+    "additions": 1991,
+    "changes": 1991,
+    "deletions": 0,
+    "filename": "docs/assets/wave_annotations.svg",
+    "status": "added"
+   },
+   {
+    "additions": 38,
+    "changes": 76,
+    "deletions": 38,
+    "filename": "docs/assets/wave_dual.svg",
+    "status": "modified"
+   },
+   {
+    "additions": 41,
+    "changes": 82,
+    "deletions": 41,
+    "filename": "docs/assets/wave_multi.svg",
+    "status": "modified"
+   },
+   {
+    "additions": 35,
+    "changes": 70,
+    "deletions": 35,
+    "filename": "docs/assets/wave_pivot.svg",
+    "status": "modified"
+   },
+   {
+    "additions": 31,
+    "changes": 62,
+    "deletions": 31,
+    "filename": "docs/assets/wave_single.svg",
+    "status": "modified"
+   },
+   {
+    "additions": 1587,
+    "changes": 1587,
+    "deletions": 0,
+    "filename": "docs/assets/wave_spectrum.svg",
+    "status": "added"
+   },
+   {
+    "additions": 1898,
+    "changes": 1898,
+    "deletions": 0,
+    "filename": "docs/assets/wave_url_climate.svg",
+    "status": "added"
+   },
+   {
+    "additions": 2174,
+    "changes": 2174,
+    "deletions": 0,
+    "filename": "docs/assets/wave_url_mortality.svg",
+    "status": "added"
+   },
+   {
+    "additions": 88,
+    "changes": 94,
+    "deletions": 6,
+    "filename": "docs/examples.md",
+    "status": "modified"
+   },
+   {
+    "additions": 44,
+    "changes": 70,
+    "deletions": 26,
+    "filename": "docs/index.md",
+    "status": "modified"
+   },
+   {
+    "additions": 51,
+    "changes": 52,
+    "deletions": 1,
+    "filename": "docs/sessions.md",
+    "status": "modified"
+   },
+   {
+    "additions": 120,
+    "changes": 120,
+    "deletions": 0,
+    "filename": "docs/url-sources.md",
+    "status": "added"
+   },
+   {
+    "additions": 58,
+    "changes": 88,
+    "deletions": 30,
+    "filename": "docs/usage.md",
+    "status": "modified"
+   },
+   {
+    "additions": 21,
+    "changes": 25,
+    "deletions": 4,
+    "filename": "src/cicwave/analysis.py",
+    "status": "modified"
+   },
+   {
+    "additions": 63,
+    "changes": 91,
+    "deletions": 28,
+    "filename": "src/cicwave/cli.py",
+    "status": "modified"
+   },
+   {
+    "additions": 18,
+    "changes": 18,
+    "deletions": 0,
+    "filename": "src/cicwave/pivot.py",
+    "status": "modified"
+   },
+   {
+    "additions": 113,
+    "changes": 144,
+    "deletions": 31,
+    "filename": "src/cicwave/wave_pg.py",
+    "status": "modified"
+   },
+   {
+    "additions": 223,
+    "changes": 236,
+    "deletions": 13,
+    "filename": "src/cicwave/wavefiles.py",
+    "status": "modified"
+   },
+   {
+    "additions": 2,
+    "changes": 2,
+    "deletions": 0,
+    "filename": "tests/docs/Makefile",
+    "status": "modified"
+   },
+   {
+    "additions": 202,
+    "changes": 202,
+    "deletions": 0,
+    "filename": "tests/docs/analysis.md",
+    "status": "added"
+   },
+   {
+    "additions": 376,
+    "changes": 376,
+    "deletions": 0,
+    "filename": "tests/docs/climate_url_snapshot.csv",
+    "status": "added"
+   },
+   {
+    "additions": 79,
+    "changes": 84,
+    "deletions": 5,
+    "filename": "tests/docs/examples.md",
+    "status": "modified"
+   },
+   {
+    "additions": 51,
+    "changes": 51,
+    "deletions": 0,
+    "filename": "tests/docs/fetch_url_snapshots.py",
+    "status": "added"
+   },
+   {
+    "additions": 21,
+    "changes": 25,
+    "deletions": 4,
+    "filename": "tests/docs/gen_testdata.py",
+    "status": "modified"
+   },
+   {
+    "additions": 8,
+    "changes": 8,
+    "deletions": 0,
+    "filename": "tests/docs/index.md",
+    "status": "modified"
+   },
+   {
+    "additions": 704,
+    "changes": 704,
+    "deletions": 0,
+    "filename": "tests/docs/mortality_url_snapshot.csv",
+    "status": "added"
+   },
+   {
+    "additions": 3,
+    "changes": 3,
+    "deletions": 0,
+    "filename": "tests/docs/pivot_spec_climate.yaml",
+    "status": "added"
+   },
+   {
+    "additions": 3,
+    "changes": 3,
+    "deletions": 0,
+    "filename": "tests/docs/pivot_spec_mortality.yaml",
+    "status": "added"
+   },
+   {
+    "additions": 16,
+    "changes": 16,
+    "deletions": 0,
+    "filename": "tests/docs/session_annotations.cicwave.yaml",
+    "status": "added"
+   },
+   {
+    "additions": 9,
+    "changes": 9,
+    "deletions": 0,
+    "filename": "tests/docs/session_spectrum.cicwave.yaml",
+    "status": "added"
+   },
+   {
+    "additions": 18,
+    "changes": 18,
+    "deletions": 0,
+    "filename": "tests/docs/session_url_climate.cicwave.yaml",
+    "status": "added"
+   },
+   {
+    "additions": 18,
+    "changes": 18,
+    "deletions": 0,
+    "filename": "tests/docs/session_url_mortality.cicwave.yaml",
+    "status": "added"
+   },
+   {
+    "additions": 138,
+    "changes": 138,
+    "deletions": 0,
+    "filename": "tests/docs/sessions.md",
+    "status": "added"
+   },
+   {
+    "additions": 1001,
+    "changes": 1001,
+    "deletions": 0,
+    "filename": "tests/docs/spectrum_data.csv",
+    "status": "added"
+   },
+   {
+    "additions": 22,
+    "changes": 26,
+    "deletions": 4,
+    "filename": "tests/docs/usage.md",
+    "status": "modified"
+   },
+   {
+    "additions": 6,
+    "changes": 6,
+    "deletions": 0,
+    "filename": "tests/unittests/test_analysis.py",
+    "status": "modified"
+   },
+   {
+    "additions": 7,
+    "changes": 7,
+    "deletions": 0,
+    "filename": "tests/unittests/test_cli_options.py",
+    "status": "modified"
+   },
+   {
+    "additions": 99,
+    "changes": 99,
+    "deletions": 0,
+    "filename": "tests/unittests/test_export_matplotlib.py",
+    "status": "added"
+   },
+   {
+    "additions": 269,
+    "changes": 269,
+    "deletions": 0,
+    "filename": "tests/unittests/test_session_roundtrip.py",
+    "status": "added"
+   },
+   {
+    "additions": 138,
+    "changes": 138,
+    "deletions": 0,
+    "filename": "tests/unittests/test_url_source.py",
+    "status": "added"
+   }
+  ],
+  "/repos/wulffern/cicwave/pulls/5/files?per_page=100": [
+   {
+    "additions": 10,
+    "changes": 11,
+    "deletions": 1,
+    "filename": "README.md",
+    "status": "modified"
+   },
+   {
+    "additions": 32,
+    "changes": 64,
+    "deletions": 32,
+    "filename": "docs/assets/wave_annotations.svg",
+    "status": "modified"
+   },
+   {
+    "additions": 38,
+    "changes": 76,
+    "deletions": 38,
+    "filename": "docs/assets/wave_dual.svg",
+    "status": "modified"
+   },
+   {
+    "additions": 41,
+    "changes": 82,
+    "deletions": 41,
+    "filename": "docs/assets/wave_multi.svg",
+    "status": "modified"
+   },
+   {
+    "additions": 35,
+    "changes": 70,
+    "deletions": 35,
+    "filename": "docs/assets/wave_pivot.svg",
+    "status": "modified"
+   },
+   {
+    "additions": 31,
+    "changes": 62,
+    "deletions": 31,
+    "filename": "docs/assets/wave_single.svg",
+    "status": "modified"
+   },
+   {
+    "additions": 49,
+    "changes": 98,
+    "deletions": 49,
+    "filename": "docs/assets/wave_spectrum.svg",
+    "status": "modified"
+   },
+   {
+    "additions": 35,
+    "changes": 70,
+    "deletions": 35,
+    "filename": "docs/assets/wave_url_climate.svg",
+    "status": "modified"
+   },
+   {
+    "additions": 27,
+    "changes": 54,
+    "deletions": 27,
+    "filename": "docs/assets/wave_url_mortality.svg",
+    "status": "modified"
+   },
+   {
+    "additions": 8,
+    "changes": 10,
+    "deletions": 2,
+    "filename": "docs/index.md",
+    "status": "modified"
+   },
+   {
+    "additions": 114,
+    "changes": 114,
+    "deletions": 0,
+    "filename": "docs/mcp.md",
+    "status": "added"
+   },
+   {
+    "additions": 13,
+    "changes": 13,
+    "deletions": 0,
+    "filename": "docs/pivot.md",
+    "status": "modified"
+   },
+   {
+    "additions": 21,
+    "changes": 24,
+    "deletions": 3,
+    "filename": "docs/usage.md",
+    "status": "modified"
+   },
+   {
+    "additions": 3,
+    "changes": 4,
+    "deletions": 1,
+    "filename": "pyproject.toml",
+    "status": "modified"
+   },
+   {
+    "additions": 60,
+    "changes": 60,
+    "deletions": 0,
+    "filename": "src/cicwave/analysis.py",
+    "status": "modified"
+   },
+   {
+    "additions": 19,
+    "changes": 30,
+    "deletions": 11,
+    "filename": "src/cicwave/cli.py",
+    "status": "modified"
+   },
+   {
+    "additions": 228,
+    "changes": 228,
+    "deletions": 0,
+    "filename": "src/cicwave/mcp_server.py",
+    "status": "added"
+   },
+   {
+    "additions": 31,
+    "changes": 40,
+    "deletions": 9,
+    "filename": "src/cicwave/wave_pg.py",
+    "status": "modified"
+   },
+   {
+    "additions": 1,
+    "changes": 1,
+    "deletions": 0,
+    "filename": "tests/docs/index.md",
+    "status": "modified"
+   },
+   {
+    "additions": 13,
+    "changes": 13,
+    "deletions": 0,
+    "filename": "tests/docs/pivot.md",
+    "status": "modified"
+   },
+   {
+    "additions": 14,
+    "changes": 15,
+    "deletions": 1,
+    "filename": "tests/docs/usage.md",
+    "status": "modified"
+   },
+   {
+    "additions": 53,
+    "changes": 53,
+    "deletions": 0,
+    "filename": "tests/unittests/test_analysis.py",
+    "status": "modified"
+   },
+   {
+    "additions": 32,
+    "changes": 32,
+    "deletions": 0,
+    "filename": "tests/unittests/test_cli_options.py",
+    "status": "modified"
+   },
+   {
+    "additions": 91,
+    "changes": 91,
+    "deletions": 0,
+    "filename": "tests/unittests/test_export_data_cli.py",
+    "status": "added"
+   },
+   {
+    "additions": 160,
+    "changes": 160,
+    "deletions": 0,
+    "filename": "tests/unittests/test_mcp_server.py",
+    "status": "added"
+   },
+   {
+    "additions": 8,
+    "changes": 8,
+    "deletions": 0,
+    "filename": "tests/unittests/test_url_source.py",
+    "status": "modified"
+   }
+  ],
+  "/repos/wulffern/cicwave/pulls/6/files?per_page=100": [
+   {
+    "additions": 2,
+    "changes": 2,
+    "deletions": 0,
+    "filename": "README.md",
+    "status": "modified"
+   },
+   {
+    "additions": 32,
+    "changes": 64,
+    "deletions": 32,
+    "filename": "docs/assets/wave_annotations.svg",
+    "status": "modified"
+   },
+   {
+    "additions": 38,
+    "changes": 76,
+    "deletions": 38,
+    "filename": "docs/assets/wave_dual.svg",
+    "status": "modified"
+   },
+   {
+    "additions": 41,
+    "changes": 82,
+    "deletions": 41,
+    "filename": "docs/assets/wave_multi.svg",
+    "status": "modified"
+   },
+   {
+    "additions": 35,
+    "changes": 70,
+    "deletions": 35,
+    "filename": "docs/assets/wave_pivot.svg",
+    "status": "modified"
+   },
+   {
+    "additions": 31,
+    "changes": 62,
+    "deletions": 31,
+    "filename": "docs/assets/wave_single.svg",
+    "status": "modified"
+   },
+   {
+    "additions": 49,
+    "changes": 98,
+    "deletions": 49,
+    "filename": "docs/assets/wave_spectrum.svg",
+    "status": "modified"
+   },
+   {
+    "additions": 35,
+    "changes": 70,
+    "deletions": 35,
+    "filename": "docs/assets/wave_url_climate.svg",
+    "status": "modified"
+   },
+   {
+    "additions": 27,
+    "changes": 54,
+    "deletions": 27,
+    "filename": "docs/assets/wave_url_mortality.svg",
+    "status": "modified"
+   },
+   {
+    "additions": 1,
+    "changes": 1,
+    "deletions": 0,
+    "filename": "docs/formats.md",
+    "status": "modified"
+   },
+   {
+    "additions": 1,
+    "changes": 2,
+    "deletions": 1,
+    "filename": "docs/index.md",
+    "status": "modified"
+   },
+   {
+    "additions": 4,
+    "changes": 7,
+    "deletions": 3,
+    "filename": "docs/url-sources.md",
+    "status": "modified"
+   },
+   {
+    "additions": 1,
+    "changes": 2,
+    "deletions": 1,
+    "filename": "docs/usage.md",
+    "status": "modified"
+   },
+   {
+    "additions": 1,
+    "changes": 2,
+    "deletions": 1,
+    "filename": "src/cicwave/cli.py",
+    "status": "modified"
+   },
+   {
+    "additions": 9,
+    "changes": 9,
+    "deletions": 0,
+    "filename": "src/cicwave/pivot.py",
+    "status": "modified"
+   },
+   {
+    "additions": 299,
+    "changes": 299,
+    "deletions": 0,
+    "filename": "src/cicwave/stdf.py",
+    "status": "added"
+   },
+   {
+    "additions": 5,
+    "changes": 6,
+    "deletions": 1,
+    "filename": "src/cicwave/wavefiles.py",
+    "status": "modified"
+   },
+   {
+    "additions": 279,
+    "changes": 279,
+    "deletions": 0,
+    "filename": "tests/unittests/test_stdf_parser.py",
+    "status": "added"
+   }
+  ],
+  "/repos/wulffern/cicwave/pulls/7/files?per_page=100": [
+   {
+    "additions": 1,
+    "changes": 1,
+    "deletions": 0,
+    "filename": "docs/sessions.md",
+    "status": "modified"
+   },
+   {
+    "additions": 1,
+    "changes": 2,
+    "deletions": 1,
+    "filename": "pyproject.toml",
+    "status": "modified"
+   },
+   {
+    "additions": 12,
+    "changes": 14,
+    "deletions": 2,
+    "filename": "src/cicwave/cli.py",
+    "status": "modified"
+   },
+   {
+    "additions": 53,
+    "changes": 60,
+    "deletions": 7,
+    "filename": "src/cicwave/wave_pg.py",
+    "status": "modified"
+   },
+   {
+    "additions": 12,
+    "changes": 12,
+    "deletions": 0,
+    "filename": "src/cicwave/wavefiles.py",
+    "status": "modified"
+   },
+   {
+    "additions": 1,
+    "changes": 1,
+    "deletions": 0,
+    "filename": "tests/docs/sessions.md",
+    "status": "modified"
+   },
+   {
+    "additions": 117,
+    "changes": 117,
+    "deletions": 0,
+    "filename": "tests/unittests/test_api_source.py",
+    "status": "modified"
+   }
+  ],
+  "/repos/wulffern/cicwave/pulls?per_page=20&state=all": [
+   {
+    "number": 7,
+    "state": "open",
+    "title": "Make a session round-trip for a spec that fetches its own data"
+   },
+   {
+    "number": 6,
+    "state": "closed",
+    "title": "Add STDF (Standard Test Data Format) file support"
+   },
+   {
+    "number": 5,
+    "state": "closed",
+    "title": "CLI/API completeness (--format txt, --export-data, more pivot steps) + MCP server"
+   },
+   {
+    "number": 4,
+    "state": "closed",
+    "title": "Add URL data sources; docs polish; fix bugs; round out session schema"
+   },
+   {
+    "number": 3,
+    "state": "closed",
+    "title": "Generate docs examples from real cicwave runs, mirroring cicsim's pipeline"
+   },
+   {
+    "number": 2,
+    "state": "closed",
+    "title": "Add Jekyll GitHub Pages docs, modeled on cicsim's docs site"
+   }
+  ]
+ }
+}
