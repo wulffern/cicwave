@@ -46,6 +46,7 @@ files:
     pivot: ../specs/pivot_spec.yaml   # optional pivot spec for this file
   - path: https://api.example.com/v1/measurements   # URL sources work too
     format: json                      # only needed for extension-less URLs
+  - source: ../specs/measurements.yaml  # spec that fetches its own API data
 
 plots:
   - name: "Transient"                # tab name
@@ -86,9 +87,12 @@ plots:
 
 | Key | Required | Description |
 |-----|----------|-------------|
-| `path` | yes | Path to the data file (relative to session file or absolute), or an `http(s)://` URL — see [URL sources](/cicwave/url-sources) |
+| `path` | yes* | Path to the data file (relative to session file or absolute), or an `http(s)://` URL — see [URL sources](/cicwave/url-sources) |
+| `source` | yes* | Path to a pivot spec that fetches its own data from a REST API — see [API sources](/cicwave/api-sources). Replaces `path` (and `pivot`) for that entry |
 | `pivot` | no | Path to a pivot spec YAML/JSON file to reshape this file before viewing |
 | `format` | no | Forces the format for a URL `path` with no recognizable extension — same as CLI `--format` |
+
+*Each entry has either a `path` or a `source`.
 
 **`plots`** — list of plot tabs:
 
