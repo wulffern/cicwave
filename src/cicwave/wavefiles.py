@@ -470,6 +470,9 @@ class WaveFile():
         self._group_loader = group_loader
         self._pending_groups = list(groups)
         self._loaded_groups = set()
+        #- Which group produced each wave, so a session can name the one
+        #- group it has to fetch to get a plotted wave back.
+        self._group_of = dict()
         self._remote = (not self._virtual) and _is_url(fname)
         self._remote_bytes = None
         self._remote_content_type = None
@@ -1056,9 +1059,18 @@ class WaveFile():
                  if c not in x_columns
                  and (self._df is None or c not in self._df.columns)]
         self._merge_group_frame(frame)
+        #- Every column the fetch brought in, not just the plottable
+        #- ones: a session may name the group's x column too, and it is
+        #- just as absent until the group is fetched.
+        for c in frame.columns:
+            self._group_of.setdefault(c, name)
         for wave in list(self.waves.values()):
             wave.reload()
         return added
+
+    def groupOf(self, name):
+        """The catalog group *name* came from, or None if it stands alone."""
+        return self._group_of.get(name)
 
     def _merge_group_frame(self, frame):
         """Append a fetched group's rows, widening the frame as needed.

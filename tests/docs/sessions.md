@@ -113,6 +113,7 @@ plots:
 | `twos_complement_bits` | no | Decode this wave as *N*-bit signed two's complement (per-wave; independent of the global `--twos-complement` flag) |
 | `digital` | no | `true` to show this wave in the digital pane instead of the analog axes |
 | `digital_format` | no | Vector display format when `digital: true`: `hex` (default), `dec`, or `bin` |
+| `group` | no | For a catalog spec: the group this wave came from, so restoring the session fetches that one group rather than the whole catalog |
 
 **`annotations`** — list of text labels placed on the plot:
 

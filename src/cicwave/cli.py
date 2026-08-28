@@ -119,6 +119,16 @@ def _spec_path_of(path):
     return path.lower()
 
 
+def _spec_ref(path):
+    """How a spec is recorded for a session: absolute path, or URL as-is.
+
+    ``os.path.abspath`` on an ``http://`` URL yields a local path that
+    names nothing, so a session written from a URL spec could not be
+    read back. Mirrors what ``PgWaveWindow.openSourceSpec`` does.
+    """
+    return path if _URL_RE.match(path) else os.path.abspath(path)
+
+
 def _is_source_spec_file(path):
     """True for a YAML/JSON pivot spec that fetches its own data.
 
@@ -210,7 +220,7 @@ def _run_catalog_spec(pivot_spec, spec, x, pivot_info_flag,
         c.win.applySession(session_path)
     c.win.browser.openLazyFrame(
         os.path.basename(pivot_spec), groups, catalog.load_group,
-        pivot_spec_path=os.path.abspath(pivot_spec))
+        pivot_spec_path=_spec_ref(pivot_spec))
     c.run()
 
 
@@ -320,7 +330,7 @@ def _run_wave_pg(files, x, sheet, pivot_spec=None,
                 name = "pivot(%s)" % os.path.basename(f)
                 c.openDataFrame(
                     pivoted, name,
-                    pivot_spec_path=os.path.abspath(pivot_spec),
+                    pivot_spec_path=_spec_ref(pivot_spec),
                     original_path=(
                         f if _URL_RE.match(f) else os.path.abspath(f)),
                     source_spec=from_source)
