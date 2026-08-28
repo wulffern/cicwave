@@ -403,7 +403,8 @@ def main(files, globs, x, sheet, fmt, pivot, pivot_info, session, export,
     advanced visualization of simulation data.
 
     Supports: .raw, .csv, .tsv, .xlsx, .json, .parquet, .feather, .npz,
-    .h5, .pkl, .vcd (digital), .iqvsa (LitePoint), .stdf (ATE), and more.
+    .h5, .pkl, .vcd (digital), .iqvsa (LitePoint), .stdf (ATE),
+    .u32 (raw counter captures), and more.
 
     \b
     URL sources:

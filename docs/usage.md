@@ -22,8 +22,8 @@ Usage: cicwave [OPTIONS] [FILES]...
   visualization of simulation data.
 
   Supports: .raw, .csv, .tsv, .xlsx, .json, .parquet, .feather, .npz, .h5,
-  .pkl, .vcd (digital), .iqvsa (LitePoint), .stdf (ATE),
-  .u32 (raw counter captures), and more.
+  .pkl, .vcd (digital), .iqvsa (LitePoint), .stdf (ATE), .u32 (raw counter
+  captures), and more.
 
   URL sources:
     cicwave https://example.com/data.csv    Any http(s) URL works directly
@@ -33,6 +33,11 @@ Usage: cicwave [OPTIONS] [FILES]...
   Pivot:
     --pivot spec.yaml     Reshape data using pivot spec before viewing
     --pivot-info          Print unique values per pivot dimension and exit
+
+  API sources:
+    cicwave api.yaml      A pivot spec with a 'source:' block fetches its
+                           own data from a JSON REST API (no file needed)
+    --pivot api.yaml      Same, spelled out
 
   Session:
     --session plot.cicwave.yaml         Load saved session
