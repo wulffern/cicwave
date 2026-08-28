@@ -998,6 +998,30 @@ class TestSpecServedOverHttp(_ApiTestCase):
         finally:
             os.unlink(path)
 
+    def test_spec_url_with_a_query_string_is_recognised(self):
+        # A generated spec is served at something like
+        # /spec.yaml?dut=X. Testing endswith(".yaml") against the whole
+        # URL missed those, and they fell through to the data loader,
+        # which reports "unsupported format '.yaml'".
+        from cicwave.cli import _is_source_spec_file, _promote_positional_spec
+
+        url = self.base + "/spec.yaml?param=X&other=1"
+        self.assertTrue(_is_source_spec_file(url))
+        self.assertEqual(_promote_positional_spec((url,), None), ((), url))
+
+    def test_query_string_spec_loads_and_fetches(self):
+        from cicwave.pivot import load_spec
+
+        spec = load_spec(self.base + "/spec.yaml?param=X")
+        self.assertEqual(len(fetch_dataframe(spec)), 2)
+
+    def test_a_data_url_is_still_not_taken_for_a_spec(self):
+        from cicwave.cli import _is_source_spec_file
+
+        self.assertFalse(_is_source_spec_file(self.base + "/api/flat"))
+        self.assertFalse(
+            _is_source_spec_file(self.base + "/data.csv?format=csv"))
+
     def test_non_mapping_response_is_rejected(self):
         from cicwave.pivot import load_spec
 

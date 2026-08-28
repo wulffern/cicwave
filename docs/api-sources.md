@@ -294,9 +294,17 @@ this way needs no `base_url` — relative paths resolve against the URL
 the spec came from, so the same spec works from wherever that service is
 reachable.
 
-A positional URL is treated as a spec when it ends in `.yaml`/`.yml`,
-since an extension-less endpoint is just as likely to be serving data.
-`--pivot <url>` says "this is a spec" with no guesswork.
+A positional URL is treated as a spec when its **path** ends in
+`.yaml`/`.yml`, so a generated spec keeps working when it takes
+parameters:
+
+```bash
+cicwave "http://api.example.com/cicwave/spec.yaml?dut=A0&band=high"
+```
+
+An extension-less endpoint is just as likely to be serving data, so
+those are not guessed at — `--pivot <url>` says "this is a spec"
+whatever the URL looks like.
 
 ### A fetched spec is not trusted with your secrets
 

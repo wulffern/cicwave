@@ -30,6 +30,7 @@ import os
 import re
 import sys
 import glob as _glob
+import urllib.parse
 import click
 from .command import setup_logging
 
@@ -111,6 +112,13 @@ def _expand_glob_patterns(files, patterns):
     return tuple(out)
 
 
+def _spec_path_of(path):
+    """Lower-cased path part of *path*, with any URL query string cut off."""
+    if _URL_RE.match(path):
+        return urllib.parse.urlsplit(path).path.lower()
+    return path.lower()
+
+
 def _is_source_spec_file(path):
     """True for a YAML/JSON pivot spec that fetches its own data.
 
@@ -126,8 +134,11 @@ def _is_source_spec_file(path):
     """
     #- Extension check first, so the pandas/Qt import chain behind
     #- apisource is paid for only when a YAML argument is actually given,
-    #- and so a plain data URL is never fetched twice.
-    if not path.lower().endswith((".yaml", ".yml")):
+    #- and so a plain data URL is never fetched twice. Test it against
+    #- the URL's path, not the whole URL: a generated spec is served at
+    #- something like `/spec.yaml?dut=X`, and the rest of cicwave already
+    #- ignores the query string when resolving a format.
+    if not _spec_path_of(path).endswith((".yaml", ".yml")):
         return False
     from .apisource import is_source_spec_file
     return is_source_spec_file(path)

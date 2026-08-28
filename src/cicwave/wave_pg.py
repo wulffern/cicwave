@@ -10,6 +10,7 @@ import math
 import os
 import sys
 import re
+from urllib.parse import urlsplit
 import numpy as np
 import pandas as pd
 from importlib.metadata import version as _pkg_version
@@ -3460,10 +3461,13 @@ class PgWaveWindow(QMainWindow):
         """
         from .apisource import is_source_spec_file
 
-        if path.lower().endswith('.cicwave.yaml'):
+        #- Match on the path part: a spec served by an API can carry a
+        #- query string, which the rest of cicwave already ignores when
+        #- resolving a format.
+        probe = (urlsplit(path).path if _is_url(path) else path).lower()
+        if probe.endswith('.cicwave.yaml'):
             self.applySession(path)
-        elif (path.lower().endswith(('.yaml', '.yml'))
-                and is_source_spec_file(path)):
+        elif probe.endswith(('.yaml', '.yml')) and is_source_spec_file(path):
             self.openSourceSpec(path)
         else:
             self.browser.openFile(path)
