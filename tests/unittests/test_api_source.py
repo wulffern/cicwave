@@ -10,6 +10,7 @@ envelope, and a per-item endpoint that has to be called once per row.
 import json
 import http.server
 import os
+import shutil
 import textwrap
 import threading
 import unittest
@@ -133,6 +134,24 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def log_message(self, *args):
         pass
+
+
+def _wave_pg_or_skip(test):
+    """The GUI module, or skip: PySide6/pyqtgraph are optional."""
+    try:
+        import cicwave.wave_pg as wave_pg
+    except Exception as e:  # pragma: no cover - optional GUI deps
+        test.skipTest("pyqtgraph / PySide6 not installed (%s)" % e)
+    return wave_pg
+
+
+def _save_session_to(wave_pg, win, path):
+    """Drive File -> Save Session, with the file dialog answered."""
+    import unittest.mock as mock
+
+    with mock.patch.object(wave_pg.QFileDialog, "getSaveFileName",
+                           staticmethod(lambda *a, **k: (path, ""))):
+        win._save_session()
 
 
 class _ApiTestCase(unittest.TestCase):
@@ -561,6 +580,28 @@ class TestSessionRoundTrip(_SpecOnDiskTestCase):
         self.assertEqual(rebuilt["files"][0].get("source"), self.spec_path)
         self.assertNotIn("path", rebuilt["files"][0])
 
+    def test_save_session_writes_a_source_entry(self):
+        # Regression: File -> Save Session relativised every entry's
+        # 'path', but a source spec is stored as 'source' with no
+        # 'path' at all, so saving raised KeyError whenever a spec that
+        # fetches its own data was open.
+        wp = _wave_pg_or_skip(self)
+        c = wp.CmdWavePg("x")
+        c.win.openPath(self.spec_path)
+        self.assertEqual(len(c.win.browser.files), 1)
+
+        out = os.path.join(self.tmp, "s.cicwave.yaml")
+        _save_session_to(wp, c.win, out)
+
+        with open(out) as fh:
+            written = yaml.safe_load(fh)
+        # Relative to the session file, so the pair stays movable.
+        self.assertEqual(written["files"][0]["source"], "api.yaml")
+
+        c2 = wp.CmdWavePg("x")
+        c2.win.applySession(out)
+        self.assertEqual(len(c2.win.browser.files), 1)
+
 
 class TestGuiOpen(_SpecOnDiskTestCase):
     """Opening a spec in the GUI (File -> Open, or drag-and-drop) has to
@@ -963,6 +1004,44 @@ class TestCatalogInGui(_ApiTestCase):
         wf = next(iter(win.browser.files.values()))
         self.assertTrue(wf.isPendingGroup("temperature.STATION_N07"))
 
+    def test_a_catalog_session_round_trips(self):
+        # Regression: applySession sent every 'source' entry through
+        # fetch_dataframe, which a catalog spec has no plain request
+        # for, so reloading died with "source: needs a 'requests' list".
+        wave_pg = _wave_pg_or_skip(self)
+        win = self._window()
+        win.openPath(self.spec_path)
+        win.browser._wave_clicked(
+            win.browser.wave_tree.topLevelItem(0).child(0), 0)
+
+        out = os.path.join(self.tmp, "s.cicwave.yaml")
+        _save_session_to(wave_pg, win, out)
+
+        win2 = self._window()
+        win2.applySession(out)
+        self.assertEqual(len(win2.browser.files), 1)
+        wf = next(iter(win2.browser.files.values()))
+        # The group that was plotted is fetched; the rest still are not.
+        self.assertTrue(wf.isPendingGroup("temperature.STATION_N07"))
+        plotted = sorted(
+            w.key for w, _unit
+            in win2.tab_widget.widget(0).wave_data.values())
+        self.assertEqual(plotted, ["temperature.STATION_N04.P1",
+                                   "temperature.STATION_N04.P2"])
+
+    def test_a_catalog_session_does_not_fetch_every_group(self):
+        # The whole point of a catalog: opening one must cost the
+        # listing plus the groups actually plotted, not the catalog.
+        wave_pg = _wave_pg_or_skip(self)
+        win = self._window()
+        win.openPath(self.spec_path)
+        out = os.path.join(self.tmp, "s.cicwave.yaml")
+        _save_session_to(wave_pg, win, out)
+
+        _Handler.request_count = 0
+        self._window().applySession(out)
+        self.assertEqual(_Handler.request_count, 1)
+
 
 class TestSpecServedOverHttp(_ApiTestCase):
     """A service can publish the spec itself, so there is no local file
@@ -1021,6 +1100,44 @@ class TestSpecServedOverHttp(_ApiTestCase):
         self.assertFalse(_is_source_spec_file(self.base + "/api/flat"))
         self.assertFalse(
             _is_source_spec_file(self.base + "/data.csv?format=csv"))
+
+    def test_a_spec_url_survives_a_session_round_trip(self):
+        # A spec fetched over HTTP has no local path. Absolutising the
+        # URL turned it into a local path naming nothing, so a session
+        # written from a spec URL could not be read back.
+        import tempfile
+
+        wave_pg = _wave_pg_or_skip(self)
+        url = self.base + "/spec.yaml?dut=A0"
+        tmp = tempfile.mkdtemp(prefix="cicwave-api-url-session-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+
+        c = wave_pg.CmdWavePg("x")
+        c.win.openPath(url)
+        self.assertEqual(len(c.win.browser.files), 1)
+
+        out = os.path.join(tmp, "s.cicwave.yaml")
+        _save_session_to(wave_pg, c.win, out)
+        with open(out) as fh:
+            written = yaml.safe_load(fh)
+        # A URL is already portable: kept whole, query string and all.
+        self.assertEqual(written["files"][0]["source"], url)
+
+        c2 = wave_pg.CmdWavePg("x")
+        c2.win.applySession(out)
+        self.assertEqual(len(c2.win.browser.files), 1)
+        # And re-saving still names the URL, not a mangled local path.
+        self.assertEqual(
+            c2.win._build_session()["files"][0]["source"], url)
+
+    def test_the_cli_records_a_spec_url_as_a_url(self):
+        # cli.py absolutised the spec for the session it would later
+        # save; for a URL that yields a path that names nothing.
+        from cicwave.cli import _spec_ref
+
+        url = self.base + "/spec.yaml?dut=A0"
+        self.assertEqual(_spec_ref(url), url)
+        self.assertEqual(_spec_ref("api.yaml"), os.path.abspath("api.yaml"))
 
     def test_non_mapping_response_is_rejected(self):
         from cicwave.pivot import load_spec

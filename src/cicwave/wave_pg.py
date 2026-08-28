@@ -4021,6 +4021,14 @@ class PgWaveWindow(QMainWindow):
                 if getattr(wave, 'show_as_digital', False):
                     wave_dict['digital'] = True
                     wave_dict['digital_format'] = wave.digital_format
+                #- A catalog's waves exist only once their group has been
+                #- fetched, so the session has to say which one to ask
+                #- for; without it the wave is simply not found on load.
+                group = None
+                if hasattr(wave.wfile, 'groupOf'):
+                    group = wave.wfile.groupOf(wave.key)
+                if group is not None:
+                    wave_dict['group'] = group
                 waves.append(wave_dict)
             plot_dict = {'name': tab_name, 'waves': waves}
             if widget.custom_xlabel:
@@ -4067,11 +4075,18 @@ class PgWaveWindow(QMainWindow):
             return
         session = self._build_session()
         session_dir = os.path.dirname(os.path.abspath(fname))
+
+        def _portable(ref):
+            #- A URL is already portable; only a local path is worth
+            #- rewriting relative to where the session is being saved.
+            return ref if _is_url(ref) else os.path.relpath(ref, session_dir)
+
         for fe in session.get('files', []):
-            if not _is_url(fe['path']):
-                fe['path'] = os.path.relpath(fe['path'], session_dir)
-            if 'pivot' in fe:
-                fe['pivot'] = os.path.relpath(fe['pivot'], session_dir)
+            #- A spec that fetches its own data is stored as 'source'
+            #- and has no 'path' at all, so key by what is there.
+            for key in ('path', 'source', 'pivot'):
+                if key in fe:
+                    fe[key] = _portable(fe[key])
 
         with open(fname, 'w') as fh:
             yaml.dump(session, fh, default_flow_style=False, sort_keys=False)
@@ -4101,15 +4116,29 @@ class PgWaveWindow(QMainWindow):
                 fpath = os.path.normpath(os.path.join(session_dir, fpath))
             fmt = fe.get('format')
             pivot_path = fpath if from_source else fe.get('pivot')
-            if pivot_path and not os.path.isabs(pivot_path):
+            if (pivot_path and not _is_url(pivot_path)
+                    and not os.path.isabs(pivot_path)):
                 pivot_path = os.path.normpath(
                     os.path.join(session_dir, pivot_path))
 
             try:
                 if pivot_path:
-                    from .apisource import load_flat_frame
+                    from .apisource import (
+                        LazyCatalog, has_catalog, load_flat_frame)
                     from .pivot import load_spec, apply_pivot
                     spec = load_spec(pivot_path)
+                    spec_ref = (pivot_path if _is_url(pivot_path)
+                                else os.path.abspath(pivot_path))
+                    if from_source and has_catalog(spec):
+                        #- Same as opening the spec directly: the groups
+                        #- are named now and each is fetched when it is
+                        #- plotted. Fetching the lot is what a catalog
+                        #- exists to avoid, session or not.
+                        catalog = LazyCatalog(spec)
+                        self.browser.openLazyFrame(
+                            os.path.basename(fpath), catalog.load(),
+                            catalog.load_group, pivot_spec_path=spec_ref)
+                        continue
                     xaxis = self.browser.xaxis or spec.get('columns', '')
                     if not self.browser.xaxis and spec.get('columns'):
                         self.browser.xaxis = spec['columns']
@@ -4120,7 +4149,7 @@ class PgWaveWindow(QMainWindow):
                     name = "pivot(%s)" % os.path.basename(fpath)
                     self.browser.openDataFrame(
                         pivoted, name,
-                        pivot_spec_path=os.path.abspath(pivot_path),
+                        pivot_spec_path=spec_ref,
                         original_path=(fpath if _is_url(fpath)
                                        else os.path.abspath(fpath)),
                         source_spec=from_source)
@@ -4145,6 +4174,10 @@ class PgWaveWindow(QMainWindow):
             for wd in pd.get('waves', []):
                 wave_name = wd.get('name')
                 style = wd.get('style', 'Lines')
+                #- A wave from a catalog group is not there until that
+                #- group is fetched; one request, not the whole catalog.
+                if wd.get('group'):
+                    self._fetch_session_group(wd['group'])
                 wave = self._find_wave(wave_name)
                 if wave:
                     bits = wd.get('twos_complement_bits')
@@ -4192,6 +4225,19 @@ class PgWaveWindow(QMainWindow):
                 if p._is_logx() and xv > 0:
                     xv = math.log10(xv)
                 p._set_cursor(which[-1], xv)
+
+    def _fetch_session_group(self, group):
+        """Fetch a catalog group a session's plot needs, if still pending."""
+        for wf in self.browser.files.values():
+            if hasattr(wf, 'isPendingGroup') and wf.isPendingGroup(group):
+                try:
+                    wf.loadGroup(group)
+                except Exception as e:
+                    QMessageBox.critical(
+                        self, "Fetch",
+                        "Failed to fetch %s:\n%s" % (group, e))
+                self.browser._fill_waves()
+                return
 
     def _find_wave(self, name):
         """Look up a PgWave by column name across all loaded files."""
