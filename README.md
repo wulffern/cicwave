@@ -47,6 +47,9 @@ repo. As such, you're here.
 - **API data sources**: a pivot spec with a `source:` block fetches its own
   data from a JSON REST API — nested records, one request per row of
   another, no data file — see [docs](https://wulffern.github.io/cicwave/api-sources)
+- **Fetch on demand**: a `catalog:` block builds the wave tree from a cheap
+  listing and downloads a series only when you plot it, so a database of
+  thousands of sweeps opens instantly
 - **Multi-dimensional data pivoting** with YAML specifications
 - **Digital waveform support** with separate analog/digital panes  
 - **Session save/restore** with `.cicwave.yaml` files

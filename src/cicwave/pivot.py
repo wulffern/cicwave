@@ -17,6 +17,10 @@ Spec format::
     aliases:               # optional: short names for long condition values
       Config:
         c0: "LV"
+    wave_name: "{Config}.{Temp}.{Parameter}"   # optional: name the waves
+                           # yourself. Dots nest in the wave tree.
+    unit: dB               # optional: y unit for the plot axis, either a
+                           # literal or "{column}" when it varies
 
 A spec can also carry a ``source:`` block, in which case it fetches the
 flat frame from a JSON REST API instead of taking a data file; see
@@ -44,17 +48,53 @@ Use ``--pivot-info`` to discover the cN keys for each condition column.
 
 import json
 import logging
+import re
 import yaml
 import pandas as pd
 
 logger = logging.getLogger("cicwave")
 
 
+class Spec(dict):
+    """A pivot spec, plus where it was loaded from.
+
+    ``origin`` is the URL a spec was fetched from, or ``None`` for one
+    read off disk. It matters because a spec is instructions, not data:
+    :mod:`cicwave.apisource` trusts a local spec with things it will not
+    give one that arrived over the network.
+    """
+
+    origin = None
+
+
 def load_spec(path):
+    """Load a pivot spec from a path or an ``http(s)://`` URL."""
+    from .wavefiles import _is_url
+
+    if _is_url(path):
+        from .wavefiles import fetch_url_bytes
+
+        data, headers = fetch_url_bytes(path)
+        text = data.decode('utf-8', errors='replace')
+        content_type = headers.get_content_type()
+        if path.endswith('.json') or content_type == 'application/json':
+            parsed = json.loads(text)
+        else:
+            #- YAML is a superset of JSON, so this also copes with an
+            #- endpoint that serves JSON under a vague content type.
+            parsed = yaml.safe_load(text)
+        if not isinstance(parsed, dict):
+            raise ValueError(
+                "%s did not return a pivot spec (got %s, expected a "
+                "mapping)" % (path, type(parsed).__name__))
+        spec = Spec(parsed)
+        spec.origin = path
+        return spec
+
     with open(path) as f:
         if path.endswith('.json'):
-            return json.load(f)
-        return yaml.safe_load(f)
+            return Spec(json.load(f))
+        return Spec(yaml.safe_load(f))
 
 
 def _is_json_kv_array(val):
@@ -103,6 +143,53 @@ def _shorten_value(val):
 
 def _condition_prefix(name):
     return name[0].upper()
+
+
+_WAVE_FIELD_RE = re.compile(r'\{([^{}]+)\}')
+
+
+def _templated_wave_names(sub, template, index_col, conditions, alias_maps):
+    """Build wave names from a ``wave_name`` template.
+
+    Fields are the index column and any condition column, substituted
+    with the same aliased short forms the default naming uses. Whitespace
+    inside a value collapses to ``_`` because the wave tree only treats a
+    dotted name as a hierarchy when it has no spaces -- otherwise a
+    template like ``{mode}.{board}`` would silently plot flat for a mode
+    that happens to be spelled with a space.
+    """
+    allowed = [index_col] + list(conditions)
+    unknown = [f for f in _WAVE_FIELD_RE.findall(template)
+               if f not in allowed]
+    if unknown:
+        raise KeyError(
+            "Pivot spec wave_name refers to %s, which is not the index or a "
+            "condition column (available: %s)" % (
+                ', '.join(unknown), ', '.join(allowed)))
+
+    def values_of(field):
+        if field == index_col:
+            values = sub[field].astype(str)
+        else:
+            amap = alias_maps.get(field, {})
+            values = sub[field].map(
+                lambda v: amap.get(v, _shorten_value(v))).astype(str)
+        return values.str.replace(r'\s+', '_', regex=True)
+
+    out = None
+    pos = 0
+    for match in _WAVE_FIELD_RE.finditer(template):
+        piece = values_of(match.group(1))
+        literal = template[pos:match.start()]
+        if literal:
+            piece = literal + piece
+        out = piece if out is None else out + piece
+        pos = match.end()
+    if out is None:
+        raise ValueError(
+            "Pivot spec wave_name has no {field} references: %r" % template)
+    tail = template[pos:]
+    return out + tail if tail else out
 
 
 def _build_alias_map(unique_vals, aliases_section):
@@ -228,12 +315,18 @@ def apply_pivot(df, spec):
     if has_xaxis:
         sub = sub.dropna(subset=[columns_col])
 
-    wave_col = sub[index_col].astype(str)
-    for cond in conditions:
-        amap = alias_maps.get(cond, {})
-        labels = sub[cond].map(
-            lambda v: amap.get(v, _shorten_value(v)))
-        wave_col = wave_col + '_' + _condition_prefix(cond) + labels.astype(str)
+    template = spec.get('wave_name')
+    if template:
+        wave_col = _templated_wave_names(
+            sub, str(template), index_col, conditions, alias_maps)
+    else:
+        wave_col = sub[index_col].astype(str)
+        for cond in conditions:
+            amap = alias_maps.get(cond, {})
+            labels = sub[cond].map(
+                lambda v: amap.get(v, _shorten_value(v)))
+            wave_col = (wave_col + '_' + _condition_prefix(cond)
+                        + labels.astype(str))
     sub['_wave'] = wave_col
 
     #- pivot_table below uses aggfunc='mean', which silently averages
@@ -285,4 +378,25 @@ def apply_pivot(df, spec):
         result.columns.name = None
         result = result.reset_index().rename(columns={'_wave': 'condition'})
 
+    unit = spec.get('unit')
+    if unit:
+        result.attrs = dict(getattr(result, 'attrs', {}) or {},
+                            cicwave_wave_unit=_wave_units(
+                                sub, str(unit), index_col, conditions,
+                                alias_maps))
     return result
+
+
+def _wave_units(sub, unit, index_col, conditions, alias_maps):
+    """Map each wave to its y unit, from a literal or a ``{field}``.
+
+    Values usually share one unit (``unit: dB``), but a pivot over a
+    parameter column can hold several, in which case the unit lives in a
+    column of its own (``unit: "{param_unit}"``).
+    """
+    if _WAVE_FIELD_RE.search(unit):
+        units = _templated_wave_names(
+            sub, unit, index_col, conditions, alias_maps)
+    else:
+        units = pd.Series(unit, index=sub.index)
+    return {wave: value for wave, value in zip(sub['_wave'], units) if value}

@@ -117,6 +117,10 @@ dmypy.json
 .DS_Store
 Thumbs.db
 
+# Windows shortcuts made by scripts/: they embed the generating machine's
+# username and home directory, so they must never be committed.
+*.lnk
+
 # docs build byproducts (tests/docs/*.svg); docs/assets/*.svg are tracked
 # explicitly with `git add -f`
 *.svg

@@ -115,12 +115,18 @@ def _is_source_spec_file(path):
     """True for a YAML/JSON pivot spec that fetches its own data.
 
     Lets a self-contained spec be passed positionally (``cicwave
-    api.yaml``) instead of as ``--pivot api.yaml`` with no file. Only a
-    ``source:`` block qualifies -- a spec that still needs a data file
-    would be ambiguous with the file itself.
+    api.yaml``, or a URL a service publishes one at) instead of as
+    ``--pivot api.yaml`` with no file. Only a ``source:`` block
+    qualifies -- a spec that still needs a data file would be ambiguous
+    with the file itself.
+
+    A URL has to end in ``.yaml``/``.yml`` to be treated this way, since
+    an extension-less endpoint is just as likely to be serving data;
+    ``--pivot <url>`` says "this is a spec" without the guesswork.
     """
     #- Extension check first, so the pandas/Qt import chain behind
-    #- apisource is paid for only when a YAML argument is actually given.
+    #- apisource is paid for only when a YAML argument is actually given,
+    #- and so a plain data URL is never fetched twice.
     if not path.lower().endswith((".yaml", ".yml")):
         return False
     from .apisource import is_source_spec_file
@@ -141,6 +147,60 @@ def _promote_positional_spec(files, pivot_spec):
               % specs[0], file=sys.stderr)
         sys.exit(2)
     return (), specs[0]
+
+
+#- How many catalog groups --pivot-info lists before summarising. A
+#- catalog can hold thousands; a screenful is enough to see the shape.
+_CATALOG_PREVIEW = 40
+
+
+def _run_catalog_spec(pivot_spec, spec, x, pivot_info_flag,
+                      export_path, export_data_path, session_path):
+    """Open a catalog spec: names now, data when a wave is clicked."""
+    from .apisource import LazyCatalog
+
+    try:
+        catalog = LazyCatalog(spec)
+        groups = catalog.load()
+    except Exception as e:
+        print("error: failed to load %s: %s" % (pivot_spec, e),
+              file=sys.stderr)
+        sys.exit(1)
+
+    if pivot_info_flag:
+        print("--- %s ---" % pivot_spec)
+        print("%d group(s), each fetched when first plotted:" % len(groups))
+        for name in groups[:_CATALOG_PREVIEW]:
+            print("  %s" % name)
+        if len(groups) > _CATALOG_PREVIEW:
+            print("  ... and %d more" % (len(groups) - _CATALOG_PREVIEW))
+        return
+
+    if export_path or export_data_path:
+        #- Nothing has been fetched yet and fetching everything is the
+        #- cost this spec exists to avoid, so there is nothing to export.
+        print("error: %s is a catalog spec: its %d group(s) are fetched "
+              "individually when you plot them, so a headless export has "
+              "nothing to write. Narrow it into a spec with a plain "
+              "'source:' block to export." % (pivot_spec, len(groups)),
+              file=sys.stderr)
+        sys.exit(2)
+
+    try:
+        from .wave_pg import CmdWavePg
+    except ImportError as e:
+        print("Error: PyQtGraph backend requires PySide6 and pyqtgraph")
+        print("Install with: pip install PySide6 pyqtgraph")
+        print(f"  ({e})")
+        sys.exit(1)
+
+    c = CmdWavePg(x)
+    if session_path:
+        c.win.applySession(session_path)
+    c.win.browser.openLazyFrame(
+        os.path.basename(pivot_spec), groups, catalog.load_group,
+        pivot_spec_path=os.path.abspath(pivot_spec))
+    c.run()
 
 
 def _run_wave_pg(files, x, sheet, pivot_spec=None,
@@ -173,9 +233,15 @@ def _run_wave_pg(files, x, sheet, pivot_spec=None,
     spec = None
     sources = ()
     if pivot_spec:
-        from .apisource import has_source, load_flat_frame
+        from .apisource import has_catalog, has_source, load_flat_frame
         from .pivot import load_spec, pivot_info, apply_pivot
         spec = load_spec(pivot_spec)
+
+        if has_catalog(spec):
+            _run_catalog_spec(pivot_spec, spec, x, pivot_info_flag,
+                              export_path, export_data_path, session_path)
+            return
+
         from_source = has_source(spec)
 
         #- A spec that fetches its own data has nothing to read from

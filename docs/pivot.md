@@ -48,6 +48,8 @@ aliases:                  # (optional) short names for condition values
   Config:
     c0: "LV"
     c1: "HV"
+wave_name: "{Config}.{Temp}.{Parameter}"   # (optional) name waves yourself
+unit: dB                  # (optional) y unit, literal or "{column}"
 ```
 
 | Key | Required | Description |
@@ -57,10 +59,57 @@ aliases:                  # (optional) short names for condition values
 | `values` | yes | Column containing the measurement values (y-axis) |
 | `conditions` | no | List of additional columns to split by. Each unique combination of (`index` × conditions) becomes its own wave. Wave names are formed as `{index}_{C}{condition_value}` |
 | `aliases` | no | Dictionary of short names for condition values. Keyed by condition column name, then `c0`, `c1`, ... for each unique value in sorted order |
+| `wave_name` | no | Template naming the waves yourself — see [Naming waves](#naming-waves) |
+| `unit` | no | Y unit for the plot axis: a literal (`dB`) or `"{column}"` when it varies by wave. Saves encoding the unit in a column-name suffix |
 
 Condition values that look like a JSON array of `{"value": ...}` objects,
 or a `KEY=VAL;KEY=VAL` string, are auto-shortened for wave names. Use
 `--pivot-info` to see the suggested `aliases` block for those columns.
+
+## Naming waves
+
+By default a wave is named `{index}_{C}{condition_value}` — `Gain_T27`
+for the example data below. That gets hard to scan once there are two
+or three conditions (`Gain_T27_CLV`). A `wave_name` template puts you
+in control:
+
+```yaml
+wave_name: "{Config}.{Temp}.{Parameter}"
+```
+
+The fields are the `index` column and any `conditions` column, using
+the same short forms `aliases` defines. Literal text around them is
+kept, so `"sweep/{Temp}/{Parameter}"` works too.
+
+**Dots build a hierarchy.** The wave tree already splits a dotted name
+into nested scopes, so the template above turns a flat list of waves
+into something you can navigate:
+
+```
+HV
+  -40
+    Gain
+    Phase
+  27
+    Gain
+    Phase
+LV
+  27
+    Gain
+```
+
+This is worth doing as soon as a sweep has more than a couple of
+dimensions: a few hundred waves are unusable as a flat list and fine as
+a tree.
+
+Whitespace inside a value becomes `_`, because the tree only treats a
+name as hierarchical when it holds no spaces — without that, a single
+condition value spelled with a space would silently flatten the whole
+tree.
+
+Naming two different rows the same thing (by leaving a condition out of
+the template) merges them into one averaged wave, the same as omitting
+that condition from `conditions`.
 
 ## Example
 

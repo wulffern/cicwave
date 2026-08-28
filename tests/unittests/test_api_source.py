@@ -18,7 +18,8 @@ import urllib.parse
 import yaml
 
 from cicwave.apisource import (
-    DEFAULT_MAX_REQUESTS, fetch_dataframe, has_source, load_flat_frame,
+    DEFAULT_MAX_REQUESTS, LazyCatalog, fetch_dataframe, has_catalog,
+    has_source, load_flat_frame,
 )
 
 
@@ -38,6 +39,16 @@ _POINTS = {
     "s1": [{"x": 100.0, "value": -1.0}, {"x": 200.0, "value": -2.0}],
     "s2": [{"x": 100.0, "value": -3.0}, {"x": 200.0, "value": -4.0}],
     "s3": [{"x": 100.0, "value": 50.0}],
+}
+
+#- A second view of the same sweeps, carrying the probe each point came
+#- from: one request returning several signals, the way a real sweep
+#- endpoint returns every board it measured.
+_PROBE_POINTS = {
+    sid: [dict(p, probe=probe, value=p["value"] - offset)
+          for probe, offset in (("P1", 0.0), ("P2", 0.5))
+          for p in points]
+    for sid, points in _POINTS.items()
 }
 
 
@@ -61,6 +72,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
         if parsed.path == "/api/series":
             self._send({"count": len(_SERIES), "rows": _SERIES}, gen)
+        elif parsed.path.endswith("/probes"):
+            sid = parsed.path.rsplit("/", 2)[-2]
+            #- Envelope carries the axis and unit, the way a real sweep
+            #- endpoint describes what it measured.
+            self._send({"points": _PROBE_POINTS.get(sid, []),
+                        "axis": "frequency", "x_label": "MHz",
+                        "unit": "degC"}, gen)
         elif parsed.path.startswith("/api/series/"):
             sid = parsed.path.rsplit("/", 2)[-2]
             points = [dict(p) for p in _POINTS.get(sid, [])]
@@ -71,6 +89,24 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._send(
                 [{"x": 1.0, "value": 10.0, "sensor": "A"},
                  {"x": 2.0, "value": 20.0, "sensor": "A"}], gen)
+        elif parsed.path == "/spec.yaml":
+            #- The service publishing its own pivot spec. No base_url:
+            #- the paths are relative to wherever this was served from.
+            self._send_text(
+                "source:\n"
+                "  url: /api/flat\n"
+                "index: sensor\n"
+                "columns: x\n"
+                "values: value\n", "application/yaml")
+        elif parsed.path == "/spec-with-secret.yaml":
+            self._send_text(
+                "source:\n"
+                "  url: /api/flat\n"
+                "  headers:\n"
+                "    Authorization: \"Bearer ${CICWAVE_TEST_SECRET}\"\n"
+                "index: sensor\n"
+                "columns: x\n"
+                "values: value\n", "application/yaml")
         elif parsed.path == "/api/not-json":
             self.send_response(200)
             self.send_header("Content-Type", "text/plain")
@@ -79,6 +115,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         else:
             self.send_response(404)
             self.end_headers()
+
+    def _send_text(self, text, content_type):
+        body = text.encode()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.end_headers()
+        self.wfile.write(body)
 
     def _send(self, payload, generation):
         body = json.dumps(payload).encode()
@@ -561,6 +604,447 @@ class TestGuiOpen(_SpecOnDiskTestCase):
         self.assertIn("could not read", message)
         self.assertIn("notaspec.yaml", message)
         self.assertNotIn("NoneType", message)
+
+
+class TestLazyCatalog(_ApiTestCase):
+    """A catalog names every series cheaply; data arrives per group."""
+
+    SPEC = """
+        source:
+          base_url: {base}
+          catalog:
+            requests:
+              - path: /api/series
+                records: rows
+                where: {{kind: temperature}}
+            group_name: "{{kind}}.{{sensor}}"
+            fetch:
+              path: /api/series/{{id}}/probes
+              records: points
+              index: probe
+              columns: x
+              values: value
+    """
+
+    def test_catalog_lists_groups_without_fetching_them(self):
+        catalog = LazyCatalog(self.spec(self.SPEC))
+        groups = catalog.load()
+        self.assertEqual(groups,
+                         ["temperature.STATION_N04", "temperature.STATION_N07"])
+        # One listing request, and nothing else.
+        self.assertEqual(_Handler.request_count, 1)
+
+    def test_group_name_values_are_sanitised(self):
+        # A dot or space inside a value would invent a tree level or
+        # flatten the hierarchy, so they collapse to underscores.
+        spec = self.spec(self.SPEC)
+        spec["source"]["catalog"]["group_name"] = "{setup}"
+        catalog = LazyCatalog(spec)
+        groups = catalog.load()
+        self.assertTrue(all("." not in g and " " not in g for g in groups),
+                        groups)
+
+    def test_loading_one_group_fetches_only_that_group(self):
+        catalog = LazyCatalog(self.spec(self.SPEC))
+        groups = catalog.load()
+        frame = catalog.load_group(groups[0])
+        self.assertEqual(_Handler.request_count, 2)
+        self.assertIn("temperature.STATION_N04.P1", frame.columns)
+        self.assertIn("temperature.STATION_N04.P2", frame.columns)
+        # Two x values, both probes side by side.
+        self.assertEqual(len(frame), 2)
+
+    def test_group_frame_declares_its_own_x_column(self):
+        catalog = LazyCatalog(self.spec(self.SPEC))
+        groups = catalog.load()
+        frame = catalog.load_group(groups[0])
+        wave_x = frame.attrs["cicwave_wave_x"]
+        wave = "temperature.STATION_N04.P1"
+        self.assertIn(wave, wave_x)
+        self.assertIn(wave_x[wave], frame.columns)
+        self.assertNotEqual(wave_x[wave], wave)
+
+    def test_derive_splits_a_packed_field_for_the_group_name(self):
+        # The listing carries several settings inside one string; the
+        # tree should have a level per setting, not one opaque leaf.
+        spec = self.spec(TestLazyCatalog.SPEC)
+        spec["source"]["catalog"]["derive"] = {
+            "mode": {"from": "setup", "kv": "MODE"},
+            "range": {"from": "setup", "kv": "RANGE"},
+        }
+        spec["source"]["catalog"]["group_name"] = "{mode}.{range}.{sensor}"
+        groups = LazyCatalog(spec).load()
+        self.assertEqual(groups, ["fast.hi.STATION_N04",
+                                  "slow.lo.STATION_N07"])
+
+    def test_derived_catalog_field_can_be_templated_into_the_fetch(self):
+        spec = self.spec(TestLazyCatalog.SPEC)
+        spec["source"]["catalog"]["derive"] = {
+            "series_id": {"from": "id", "regex": r"s(\d+)", "type": "int"},
+        }
+        spec["source"]["catalog"]["group_name"] = "{series_id}"
+        catalog = LazyCatalog(spec)
+        groups = catalog.load()
+        self.assertEqual(groups, ["1", "2"])
+        # An int id must not become "1.0" on its way into a URL.
+        spec["source"]["catalog"]["fetch"]["path"] = \
+            "/api/series/s{series_id}/probes"
+        frame = catalog.load_group("1")
+        self.assertIn("1.P1", frame.columns)
+
+    def test_derive_from_a_missing_field_is_reported(self):
+        spec = self.spec(TestLazyCatalog.SPEC)
+        spec["source"]["catalog"]["derive"] = {
+            "x": {"from": "nosuchfield", "kv": "MODE"},
+        }
+        with self.assertRaises(ValueError) as cm:
+            LazyCatalog(spec).load()
+        self.assertIn("nosuchfield", str(cm.exception))
+
+    def test_x_name_and_unit_come_from_the_response_envelope(self):
+        spec = self.spec(TestLazyCatalog.SPEC)
+        spec["source"]["catalog"]["fetch"]["x_name"] = "{axis}_{x_label}"
+        spec["source"]["catalog"]["fetch"]["unit"] = "{unit}"
+        catalog = LazyCatalog(spec)
+        groups = catalog.load()
+        frame = catalog.load_group(groups[0])
+
+        wave = "temperature.STATION_N04.P1"
+        self.assertTrue(
+            frame.attrs["cicwave_wave_x"][wave].endswith("frequency_MHz"),
+            frame.attrs["cicwave_wave_x"][wave])
+        self.assertEqual(frame.attrs["cicwave_wave_unit"][wave], "degC")
+
+    def test_unit_from_an_unknown_envelope_field_is_reported(self):
+        spec = self.spec(TestLazyCatalog.SPEC)
+        spec["source"]["catalog"]["fetch"]["unit"] = "{nosuchfield}"
+        catalog = LazyCatalog(spec)
+        groups = catalog.load()
+        with self.assertRaises(ValueError) as cm:
+            catalog.load_group(groups[0])
+        self.assertIn("nosuchfield", str(cm.exception))
+
+    def test_empty_field_becomes_a_visible_segment(self):
+        # An empty value would otherwise render as a blank tree row.
+        from cicwave.apisource import _sanitize_name
+
+        self.assertEqual(_sanitize_name(""), "unset")
+        self.assertEqual(_sanitize_name(None), "unset")
+        self.assertEqual(_sanitize_name("  "), "unset")
+        # Slashes, spaces and dots would each invent or flatten a level.
+        self.assertEqual(_sanitize_name("a/b mode"), "a_b_mode")
+        self.assertEqual(_sanitize_name("v1.2"), "v1_2")
+
+    def test_unknown_group_is_an_error(self):
+        catalog = LazyCatalog(self.spec(self.SPEC))
+        catalog.load()
+        with self.assertRaises(ValueError) as cm:
+            catalog.load_group("nosuch.group")
+        self.assertIn("nosuch.group", str(cm.exception))
+
+    def test_group_name_field_must_exist_in_the_catalog(self):
+        spec = self.spec(self.SPEC)
+        spec["source"]["catalog"]["group_name"] = "{nosuchfield}"
+        with self.assertRaises(ValueError) as cm:
+            LazyCatalog(spec).load()
+        self.assertIn("nosuchfield", str(cm.exception))
+
+    def test_fetch_block_must_say_what_the_axes_are(self):
+        spec = self.spec(self.SPEC)
+        del spec["source"]["catalog"]["fetch"]["columns"]
+        with self.assertRaises(ValueError) as cm:
+            LazyCatalog(spec)
+        self.assertIn("columns", str(cm.exception))
+
+    def test_has_catalog_detects_the_block(self):
+        self.assertTrue(has_catalog(self.spec(self.SPEC)))
+        self.assertFalse(has_catalog({"source": {"url": "http://x/y"}}))
+
+
+class TestLazyWaveFile(_ApiTestCase):
+    """The WaveFile side: names up front, samples on demand."""
+
+    def _lazy_file(self):
+        from cicwave.wavefiles import WaveFiles
+
+        catalog = LazyCatalog(self.spec(TestLazyCatalog.SPEC))
+        groups = catalog.load()
+        files = WaveFiles()
+        return files.openLazyFrame("cat", "", groups, catalog.load_group)
+
+    def test_pending_groups_appear_as_wave_names(self):
+        wf = self._lazy_file()
+        self.assertIn("temperature.STATION_N04", wf.getWaveNames())
+        self.assertTrue(wf.isPendingGroup("temperature.STATION_N04"))
+
+    def test_loading_a_group_replaces_it_with_its_waves(self):
+        wf = self._lazy_file()
+        added = wf.loadGroup("temperature.STATION_N04")
+        self.assertEqual(added, ["temperature.STATION_N04.P1",
+                                 "temperature.STATION_N04.P2"])
+        self.assertFalse(wf.isPendingGroup("temperature.STATION_N04"))
+        self.assertIn("temperature.STATION_N04.P1", wf.getWaveNames())
+
+    def test_x_column_is_not_offered_as_a_wave(self):
+        wf = self._lazy_file()
+        added = wf.loadGroup("temperature.STATION_N04")
+        self.assertTrue(all("::x::" not in name for name in added), added)
+
+    def test_second_group_widens_the_frame_without_disturbing_the_first(self):
+        wf = self._lazy_file()
+        wf.loadGroup("temperature.STATION_N04")
+        wf.loadGroup("temperature.STATION_N07")
+        names = wf.getWaveNames()
+        self.assertIn("temperature.STATION_N04.P1", names)
+        self.assertIn("temperature.STATION_N07.P1", names)
+        # Rows are stacked, not joined: each group keeps its own.
+        self.assertEqual(len(wf.df), 4)
+
+    def test_group_with_no_samples_stays_in_the_tree(self):
+        # `humidity` is filtered out of the catalog, so build one whose
+        # fetch legitimately returns nothing.
+        from cicwave.wavefiles import WaveFiles
+
+        spec = self.spec(TestLazyCatalog.SPEC)
+        spec["source"]["catalog"]["fetch"]["where"] = {"probe": "nosuch"}
+        catalog = LazyCatalog(spec)
+        groups = catalog.load()
+        wf = WaveFiles().openLazyFrame("cat", "", groups, catalog.load_group)
+
+        self.assertEqual(wf.loadGroup(groups[0]), [])
+        self.assertIn(groups[0], wf.getWaveNames())
+        before = _Handler.request_count
+        self.assertEqual(wf.loadGroup(groups[0]), [])
+        self.assertEqual(_Handler.request_count, before)
+
+    def test_loading_the_same_group_twice_does_not_refetch(self):
+        wf = self._lazy_file()
+        wf.loadGroup("temperature.STATION_N04")
+        before = _Handler.request_count
+        self.assertEqual(wf.loadGroup("temperature.STATION_N04"), [])
+        self.assertEqual(_Handler.request_count, before)
+
+
+class TestLazyPlotting(_ApiTestCase):
+    """Per-wave x-axes, so groups swept against different axes coexist."""
+
+    def _wave(self, wave_name):
+        try:
+            from cicwave.wave_pg import PgWave
+        except Exception as e:  # pragma: no cover - optional GUI deps
+            self.skipTest("pyqtgraph / PySide6 not installed (%s)" % e)
+        from cicwave.wavefiles import WaveFiles
+
+        catalog = LazyCatalog(self.spec(TestLazyCatalog.SPEC))
+        groups = catalog.load()
+        files = WaveFiles()
+        wf = files.openLazyFrame("cat", "", groups, catalog.load_group)
+        for group in groups:
+            wf.loadGroup(group)
+        return PgWave(wf, wave_name, "")
+
+    def test_wave_reads_its_own_x_and_skips_other_groups_rows(self):
+        wave = self._wave("temperature.STATION_N04.P1")
+        self.assertEqual(len(wave.x), 2)
+        self.assertEqual(len(wave.y), 2)
+        self.assertEqual(list(wave.x), [100.0, 200.0])
+        self.assertEqual(list(wave.y), [-1.0, -2.0])
+
+    def test_second_group_gets_its_own_values(self):
+        wave = self._wave("temperature.STATION_N07.P1")
+        self.assertEqual(list(wave.y), [-3.0, -4.0])
+
+    def test_unfetched_group_plots_nothing_rather_than_fetching(self):
+        try:
+            from cicwave.wave_pg import PgWave
+        except Exception as e:  # pragma: no cover - optional GUI deps
+            self.skipTest("pyqtgraph / PySide6 not installed (%s)" % e)
+        from cicwave.wavefiles import WaveFiles
+
+        catalog = LazyCatalog(self.spec(TestLazyCatalog.SPEC))
+        groups = catalog.load()
+        wf = WaveFiles().openLazyFrame("cat", "", groups, catalog.load_group)
+        before = _Handler.request_count
+        wave = PgWave(wf, groups[0], "")
+        # Bulk paths (plot-all, headless export autoplot) walk every name;
+        # they must not turn into one request per catalog entry.
+        self.assertIsNone(wave.y)
+        self.assertEqual(_Handler.request_count, before)
+
+
+class TestCatalogInGui(_ApiTestCase):
+    """Clicking an unfetched group is what triggers the request."""
+
+    def setUp(self):
+        super().setUp()
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        os.environ.setdefault("CICSIM_USE_OPENGL", "0")
+        import tempfile
+
+        self.tmp = tempfile.mkdtemp(prefix="cicwave-catalog-")
+        self.spec_path = os.path.join(self.tmp, "catalog.yaml")
+        with open(self.spec_path, "w") as fh:
+            yaml.safe_dump(self.spec(TestLazyCatalog.SPEC), fh)
+
+    def tearDown(self):
+        import shutil
+
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _window(self):
+        try:
+            from cicwave.wave_pg import CmdWavePg
+        except Exception as e:  # pragma: no cover - optional GUI deps
+            self.skipTest("pyqtgraph / PySide6 not installed (%s)" % e)
+        return CmdWavePg(None).win
+
+    @staticmethod
+    def _leaves(tree):
+        found = []
+
+        def walk(item, path):
+            here = path + [item.text(0)]
+            if item.childCount() == 0:
+                found.append(".".join(here))
+            for i in range(item.childCount()):
+                walk(item.child(i), here)
+
+        for i in range(tree.topLevelItemCount()):
+            walk(tree.topLevelItem(i), [])
+        return found
+
+    def test_opening_a_catalog_shows_the_tree_without_fetching(self):
+        win = self._window()
+        win.openPath(self.spec_path)
+        self.assertEqual(
+            sorted(self._leaves(win.browser.wave_tree)),
+            ["temperature.STATION_N04", "temperature.STATION_N07"])
+        self.assertEqual(_Handler.request_count, 1)
+
+    def test_clicking_a_group_fetches_and_plots_it(self):
+        win = self._window()
+        win.openPath(self.spec_path)
+
+        item = win.browser.wave_tree.topLevelItem(0).child(0)
+        win.browser._wave_clicked(item, 0)
+
+        self.assertEqual(_Handler.request_count, 2)
+        plot = win.tab_widget.widget(0)
+        plotted = sorted(w.key for w, _unit in plot.wave_data.values())
+        self.assertEqual(plotted, ["temperature.STATION_N04.P1",
+                                   "temperature.STATION_N04.P2"])
+        # The tree now shows what the fetch produced.
+        self.assertIn("temperature.STATION_N04.P1",
+                      self._leaves(win.browser.wave_tree))
+
+    def test_fetching_keeps_the_tree_open(self):
+        # Regression: the refill after a fetch rebuilt the tree from
+        # scratch, collapsing every scope the user had opened.
+        win = self._window()
+        win.openPath(self.spec_path)
+        tree = win.browser.wave_tree
+        top = tree.topLevelItem(0)
+        top.setExpanded(True)
+
+        win.browser._wave_clicked(top.child(0), 0)
+
+        top = tree.topLevelItem(0)
+        self.assertTrue(top.isExpanded(), "top-level scope collapsed")
+        group = top.child(0)
+        self.assertTrue(group.isExpanded(),
+                        "the group just fetched should show its waves")
+        self.assertEqual(group.childCount(), 2)
+
+    def test_the_other_group_is_still_unfetched(self):
+        win = self._window()
+        win.openPath(self.spec_path)
+        win.browser._wave_clicked(
+            win.browser.wave_tree.topLevelItem(0).child(0), 0)
+        wf = next(iter(win.browser.files.values()))
+        self.assertTrue(wf.isPendingGroup("temperature.STATION_N07"))
+
+
+class TestSpecServedOverHttp(_ApiTestCase):
+    """A service can publish the spec itself, so there is no local file
+    to keep in step with the API."""
+
+    def test_spec_url_is_fetched_and_used(self):
+        from cicwave.pivot import load_spec
+
+        spec = load_spec(self.base + "/spec.yaml")
+        self.assertEqual(spec.origin, self.base + "/spec.yaml")
+        df = fetch_dataframe(spec)
+        self.assertEqual(len(df), 2)
+
+    def test_relative_paths_resolve_against_the_spec_url(self):
+        # The served spec has no base_url; it should still reach the
+        # service that handed it out.
+        from cicwave.pivot import load_spec
+
+        spec = load_spec(self.base + "/spec.yaml")
+        self.assertIsNone((spec.get("source") or {}).get("base_url"))
+        self.assertEqual(list(fetch_dataframe(spec)["sensor"]), ["A", "A"])
+
+    def test_local_spec_has_no_origin(self):
+        import tempfile
+        from cicwave.pivot import load_spec
+
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml",
+                                         delete=False) as fh:
+            fh.write("source:\n  url: http://127.0.0.1:1/x\n")
+            path = fh.name
+        try:
+            self.assertIsNone(load_spec(path).origin)
+        finally:
+            os.unlink(path)
+
+    def test_non_mapping_response_is_rejected(self):
+        from cicwave.pivot import load_spec
+
+        # A data endpoint (a JSON list) is not a spec.
+        with self.assertRaises(ValueError) as cm:
+            load_spec(self.base + "/api/flat")
+        self.assertIn("did not return a pivot spec", str(cm.exception))
+
+
+class TestRemoteSpecCannotReadSecrets(_ApiTestCase):
+    """A spec is instructions, not data. One fetched over the network
+    must not be able to put a local secret into a request header."""
+
+    def test_remote_spec_may_not_expand_environment_variables(self):
+        from cicwave.pivot import load_spec
+
+        os.environ["CICWAVE_TEST_SECRET"] = "sekret"
+        try:
+            spec = load_spec(self.base + "/spec-with-secret.yaml")
+            with self.assertRaises(ValueError) as cm:
+                fetch_dataframe(spec)
+        finally:
+            del os.environ["CICWAVE_TEST_SECRET"]
+        message = str(cm.exception)
+        self.assertIn("not allowed", message)
+        self.assertIn("Authorization", message)
+        # The point of the guard: the value never leaves the process.
+        self.assertNotIn("sekret", message)
+        self.assertNotIn("sekret", str(_Handler.seen_auth))
+
+    def test_the_same_spec_from_disk_still_expands_it(self):
+        import tempfile
+        from cicwave.pivot import load_spec
+
+        os.environ["CICWAVE_TEST_SECRET"] = "sekret"
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml",
+                                         delete=False) as fh:
+            fh.write("source:\n  url: %s/api/flat\n"
+                     "  headers: {Authorization: \"Bearer "
+                     "${CICWAVE_TEST_SECRET}\"}\n" % self.base)
+            path = fh.name
+        try:
+            fetch_dataframe(load_spec(path))
+        finally:
+            del os.environ["CICWAVE_TEST_SECRET"]
+            os.unlink(path)
+        self.assertEqual(_Handler.seen_auth[-1], "Bearer sekret")
 
 
 class TestLoadFlatFrame(_ApiTestCase):

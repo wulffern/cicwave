@@ -45,6 +45,11 @@ reshapes as usual.
 Everything here is data, not code: there is no expression language to
 evaluate, so opening someone else's spec fetches URLs (guarded the same
 way :mod:`cicwave.wavefiles` guards them) but cannot run anything.
+
+A spec can itself be served over HTTP, so the API that owns the data can
+publish how to plot it. Such a spec needs no ``base_url`` -- relative
+paths resolve against where it came from -- and is refused ``${VAR}``
+expansion in headers, since it is instructions from a remote party.
 """
 
 import json
@@ -55,7 +60,7 @@ import urllib.parse
 
 import pandas as pd
 
-from .wavefiles import fetch_url_bytes, _is_url
+from .wavefiles import WAVE_X_MARKER, fetch_url_bytes, _is_url
 
 logger = logging.getLogger("cicwave")
 
@@ -68,14 +73,35 @@ DEFAULT_TIMEOUT_S = 30
 
 _ENV_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 _FIELD_RE = re.compile(r"\{([^{}]+)\}")
+_WAVE_FIELD_RE = _FIELD_RE
+
+def _sanitize_name(value):
+    """Make *value* usable as one segment of a wave name.
+
+    The wave tree splits on dots and only treats a name as hierarchical
+    when it has no spaces or brackets, so a value carrying any of those
+    would either invent a tree level or flatten the whole thing. A field
+    the source left empty becomes ``unset`` rather than an empty
+    segment, which would show up as a blank row in the tree.
+    """
+    if value is None:
+        return "unset"
+    text = re.sub(r"[^\w\-+]+", "_", str(value).strip())
+    return text.strip("_") or "unset"
 
 _REQUEST_KEYS = {
     "name", "path", "url", "params", "records", "where", "merge", "keep",
     "for_each", "headers_as_columns",
 }
+_CATALOG_KEYS = {"requests", "group_name", "fetch", "derive"}
+_FETCH_KEYS = {
+    "path", "url", "params", "records", "where", "index", "columns",
+    "values", "x_name", "unit", "rename", "derive", "filter",
+    "headers_as_columns",
+}
 _SOURCE_KEYS = {
     "base_url", "requests", "headers", "timeout", "max_requests",
-    "require_consistent_headers", "rename", "derive", "filter",
+    "require_consistent_headers", "rename", "derive", "filter", "catalog",
     #- single-request shorthand, promoted to a one-element `requests`
     "url", "path", "params", "records", "where", "keep",
     "headers_as_columns",
@@ -113,8 +139,40 @@ def _expand_env(value):
     return _ENV_RE.sub(sub, value)
 
 
-def _resolve_headers(headers):
-    return {str(k): _expand_env(str(v)) for k, v in (headers or {}).items()}
+def _resolve_headers(headers, origin=None):
+    """Resolve request headers, expanding ``${VAR}`` for local specs only.
+
+    A spec that arrived over the network is instructions from whoever
+    served it. Letting one expand an environment variable would turn
+    ``cicwave https://somewhere/spec.yaml`` into "send my token to a host
+    of their choosing", so remote specs are refused that. A local spec is
+    a file the user chose to open, and keeps the feature.
+    """
+    resolved = {}
+    for key, value in (headers or {}).items():
+        text = str(value)
+        if origin and _ENV_RE.search(text):
+            raise ValueError(
+                "source: header '%s' expands an environment variable, which "
+                "a spec fetched from %s is not allowed to do -- it would "
+                "send a local secret to whichever host the spec names. Save "
+                "the spec to a file if you trust it." % (key, origin))
+        resolved[str(key)] = _expand_env(text)
+    return resolved
+
+
+def _origin_base_url(origin):
+    """``scheme://host`` of the spec's own URL, or ``None``.
+
+    Lets a service publish a spec whose paths are all relative, so the
+    same spec works wherever that service is reachable.
+    """
+    if not origin:
+        return None
+    parts = urllib.parse.urlsplit(origin)
+    if not (parts.scheme and parts.netloc):
+        return None
+    return "%s://%s" % (parts.scheme, parts.netloc)
 
 
 def _template(value, row, where):
@@ -309,29 +367,31 @@ def _run_request(req, idx, results, fetcher):
     return out
 
 
-def _derive_series(df, name, rule):
+def _derive_extractor(rule, what):
+    """Return ``f(text) -> value`` for one derive rule.
+
+    Shared by the frame path (a whole column at a time) and the catalog
+    path, which derives from raw records before any frame exists.
+    """
     if not isinstance(rule, dict):
-        raise ValueError("source: derive '%s' must be a mapping" % name)
-    what = "source: derive '%s'" % name
-    src = rule.get("from")
-    if not src:
-        raise ValueError("%s: needs a 'from' column" % what)
-    if src not in df.columns:
-        raise ValueError(
-            "%s: column '%s' not in the fetched data (available: %s)" % (
-                what, src, ", ".join(map(str, df.columns))))
-    col = df[src].astype(str)
+        raise ValueError("%s: must be a mapping" % what)
 
     if "regex" in rule:
+        pattern = re.compile(str(rule["regex"]))
         group = int(rule.get("group", 1))
-        extracted = col.str.extract(str(rule["regex"]), expand=True)
-        if group > extracted.shape[1]:
+        if group > pattern.groups:
             raise ValueError(
                 "%s: regex has %d capture group(s), asked for group %d" % (
-                    what, extracted.shape[1], group))
-        out = extracted[extracted.columns[group - 1]]
-    elif "kv" in rule:
-        #- "KEY=VAL;KEY=VAL" condition strings, the shape a test setup
+                    what, pattern.groups, group))
+
+        def extract(text):
+            match = pattern.search(text)
+            return match.group(group) if match else None
+
+        return extract
+
+    if "kv" in rule:
+        #- "KEY=VAL;KEY=VAL" strings, the shape a set of test conditions
         #- usually gets flattened into.
         sep = str(rule.get("sep", ";"))
         assign = str(rule.get("assign", "="))
@@ -340,13 +400,14 @@ def _derive_series(df, name, rule):
         def pick(text):
             for field in text.split(sep):
                 if assign in field:
-                    k, v = field.split(assign, 1)
-                    if k.strip() == key:
-                        return v
+                    name, value = field.split(assign, 1)
+                    if name.strip() == key:
+                        return value
             return None
 
-        out = col.map(pick)
-    elif "split" in rule:
+        return pick
+
+    if "split" in rule:
         sep = str(rule["split"])
         index = int(rule.get("index", -1))
 
@@ -357,10 +418,35 @@ def _derive_series(df, name, rule):
             except IndexError:
                 return None
 
-        out = col.map(part)
-    else:
+        return part
+
+    raise ValueError("%s: needs one of 'regex', 'kv' or 'split'" % what)
+
+
+def _cast_value(value, dtype, what):
+    if dtype in (None, "str"):
+        return value
+    if dtype not in ("int", "float"):
         raise ValueError(
-            "%s: needs one of 'regex', 'kv' or 'split'" % what)
+            "%s: unknown type '%s' (int, float or str)" % (what, dtype))
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return int(number) if dtype == "int" else number
+
+
+def _derive_series(df, name, rule):
+    what = "source: derive '%s'" % name
+    src = rule.get("from") if isinstance(rule, dict) else None
+    if not src:
+        raise ValueError("%s: needs a 'from' column" % what)
+    if src not in df.columns:
+        raise ValueError(
+            "%s: column '%s' not in the fetched data (available: %s)" % (
+                what, src, ", ".join(map(str, df.columns))))
+
+    out = df[src].astype(str).map(_derive_extractor(rule, what))
 
     dtype = rule.get("type")
     if dtype in ("int", "float"):
@@ -371,6 +457,58 @@ def _derive_series(df, name, rule):
         raise ValueError(
             "%s: unknown type '%s' (int, float or str)" % (what, dtype))
     return out
+
+
+def _derive_records(rows, derive, what):
+    """Add derived fields to raw records, in place.
+
+    Records rather than a frame: a catalog row carries the ids that get
+    templated into later request URLs, and a round trip through pandas
+    would turn an integer id into ``9402112.0``.
+    """
+    for name, rule in (derive or {}).items():
+        rule_what = "%s: derive '%s'" % (what, name)
+        src = rule.get("from") if isinstance(rule, dict) else None
+        if not src:
+            raise ValueError("%s: needs a 'from' field" % rule_what)
+        extract = _derive_extractor(rule, rule_what)
+        dtype = rule.get("type")
+        for row in rows:
+            if src not in row:
+                raise ValueError(
+                    "%s: field '%s' is not in the records (available: %s)" % (
+                        rule_what, src, ", ".join(sorted(row)) or "none"))
+            value = extract("" if row[src] is None else str(row[src]))
+            row[name] = _cast_value(value, dtype, rule_what)
+    return rows
+
+
+def _make_fetcher(src, origin=None):
+    return _Fetcher(
+        base_url=src.get("base_url") or _origin_base_url(origin),
+        headers=_resolve_headers(src.get("headers"), origin),
+        timeout=float(src.get("timeout", DEFAULT_TIMEOUT_S)),
+        max_requests=int(src.get("max_requests", DEFAULT_MAX_REQUESTS)),
+        consistent_headers=src.get("require_consistent_headers"),
+    )
+
+
+def _run_requests(requests_, fetcher, what):
+    """Run a list of requests in order; return the last one's records."""
+    if not requests_:
+        raise ValueError("%s: needs a 'requests' list" % what)
+    if not isinstance(requests_, list):
+        raise ValueError("%s: 'requests' must be a list" % what)
+    results = {}
+    rows = []
+    for idx, req in enumerate(requests_):
+        if not isinstance(req, dict):
+            raise ValueError("%s: request #%d must be a mapping" % (what, idx))
+        rows = _run_request(req, idx, results, fetcher)
+        results[req.get("name") or "#%d" % idx] = rows
+        logger.debug("%s: request %s produced %d row(s)",
+                     what, req.get("name") or "#%d" % idx, len(rows))
+    return rows
 
 
 def fetch_dataframe(spec):
@@ -386,70 +524,247 @@ def fetch_dataframe(spec):
             raise ValueError(
                 "source: needs a 'requests' list, or a single 'url'/'path'")
         requests_ = [{k: src[k] for k in _REQUEST_KEYS if k in src}]
-    if not isinstance(requests_, list):
-        raise ValueError("source: 'requests' must be a list")
 
-    fetcher = _Fetcher(
-        base_url=src.get("base_url"),
-        headers=_resolve_headers(src.get("headers")),
-        timeout=float(src.get("timeout", DEFAULT_TIMEOUT_S)),
-        max_requests=int(src.get("max_requests", DEFAULT_MAX_REQUESTS)),
-        consistent_headers=src.get("require_consistent_headers"),
-    )
-
-    results = {}
-    rows = []
-    for idx, req in enumerate(requests_):
-        if not isinstance(req, dict):
-            raise ValueError("source: request #%d must be a mapping" % idx)
-        rows = _run_request(req, idx, results, fetcher)
-        results[req.get("name") or "#%d" % idx] = rows
-        logger.debug("source: request %s produced %d row(s)",
-                     req.get("name") or "#%d" % idx, len(rows))
+    fetcher = _make_fetcher(src, getattr(spec, "origin", None))
+    rows = _run_requests(requests_, fetcher, "source")
 
     if not rows:
         raise ValueError(
             "source: the last request produced no records; check its "
             "'where' filter and query parameters")
 
-    df = pd.DataFrame.from_records(rows)
+    df = _post_process(pd.DataFrame.from_records(rows), src, "source")
 
-    rename = src.get("rename") or {}
+    logger.info("source: %d row(s) from %d request(s)",
+                len(df), fetcher.count)
+    return df
+
+
+def _post_process(df, block, what):
+    """Apply a block's ``rename`` / ``derive`` / ``filter`` to *df*."""
+    rename = block.get("rename") or {}
     missing = [c for c in rename if c not in df.columns]
     if missing:
         raise ValueError(
-            "source: rename refers to column(s) %s that were not fetched "
+            "%s: rename refers to column(s) %s that were not fetched "
             "(available: %s)" % (
-                ", ".join(missing), ", ".join(map(str, df.columns))))
+                what, ", ".join(missing), ", ".join(map(str, df.columns))))
     df = df.rename(columns=rename)
 
-    for name, rule in (src.get("derive") or {}).items():
+    for name, rule in (block.get("derive") or {}).items():
         df[name] = _derive_series(df, name, rule)
 
     #- Runs after rename/derive, so it can select on a column that only
     #- exists once the raw records have been reshaped -- which a
     #- request's `where` cannot. `where` prunes requests, `filter` prunes
     #- rows; a narrow spec usually wants both.
-    row_filter = src.get("filter") or {}
+    row_filter = block.get("filter") or {}
     if row_filter:
         unknown = [c for c in row_filter if c not in df.columns]
         if unknown:
             raise ValueError(
-                "source: filter refers to column(s) %s that do not exist "
+                "%s: filter refers to column(s) %s that do not exist "
                 "(available: %s)" % (
-                    ", ".join(unknown), ", ".join(map(str, df.columns))))
+                    what, ", ".join(unknown), ", ".join(map(str, df.columns))))
         before = len(df)
         keep = df.apply(lambda r: _matches(r, row_filter), axis=1)
         df = df[keep].reset_index(drop=True)
         if df.empty:
             raise ValueError(
-                "source: filter %r matched none of the %d fetched row(s)" % (
-                    row_filter, before))
-        logger.debug("source: filter kept %d of %d row(s)", len(df), before)
-
-    logger.info("source: %d row(s) from %d request(s)",
-                len(df), fetcher.count)
+                "%s: filter %r matched none of the %d fetched row(s)" % (
+                    what, row_filter, before))
+        logger.debug("%s: filter kept %d of %d row(s)", what, len(df), before)
     return df
+
+
+def has_catalog(spec):
+    """True if *spec* enumerates series to fetch on demand."""
+    return bool(isinstance(spec, dict)
+                and (spec.get("source") or {}).get("catalog"))
+
+
+class LazyCatalog:
+    """A catalog of series that are fetched one group at a time.
+
+    Enumerating what a service holds is cheap -- one listing request --
+    while downloading all of it is not: a characterisation database can
+    list thousands of sweeps, which is minutes of requests and mostly
+    data nobody asked to see. So the catalog names the series, the wave
+    tree is built from those names, and :meth:`load_group` runs the
+    per-group request the first time something under it is plotted.
+
+    One fetch usually yields several waves (a sweep returns every board
+    it measured), so a group is a branch of the tree rather than a leaf.
+    """
+
+    def __init__(self, spec):
+        src = spec.get("source") or {}
+        _check_keys(src, _SOURCE_KEYS, "source")
+        catalog = src.get("catalog") or {}
+        _check_keys(catalog, _CATALOG_KEYS, "source: catalog")
+
+        self._src = src
+        self._catalog = catalog
+        self._fetch = catalog.get("fetch") or {}
+        _check_keys(self._fetch, _FETCH_KEYS, "source: catalog: fetch")
+        if not self._fetch:
+            raise ValueError(
+                "source: catalog needs a 'fetch' block saying how to load "
+                "one group's data")
+        for key in ("index", "columns", "values"):
+            if not self._fetch.get(key):
+                raise ValueError(
+                    "source: catalog: fetch needs '%s' (the field in each "
+                    "fetched record that gives the %s)" % (key, {
+                        "index": "wave name",
+                        "columns": "x-axis",
+                        "values": "y-axis",
+                    }[key]))
+
+        self._group_template = catalog.get("group_name")
+        if not self._group_template:
+            raise ValueError(
+                "source: catalog needs 'group_name', a template naming each "
+                "series (dots nest in the wave tree)")
+
+        self._fetcher = _make_fetcher(src, getattr(spec, "origin", None))
+        self._rows_by_group = {}
+        self.groups = []
+
+    def load(self):
+        """Run the catalog requests and return the group names."""
+        rows = _run_requests(self._catalog.get("requests"), self._fetcher,
+                             "source: catalog")
+        #- Lets group_name split on something the listing only carries
+        #- inside a packed field, e.g. one setting out of a
+        #- "KEY=VAL;KEY=VAL" condition string.
+        rows = _derive_records(rows, self._catalog.get("derive"),
+                               "source: catalog")
+        fields = _WAVE_FIELD_RE.findall(self._group_template)
+        collisions = 0
+        for row in rows:
+            missing = [f for f in fields if f not in row]
+            if missing:
+                raise ValueError(
+                    "source: catalog: group_name refers to %s, which the "
+                    "catalog records do not have (available: %s)" % (
+                        ", ".join(missing), ", ".join(sorted(row))))
+            name = _WAVE_FIELD_RE.sub(
+                lambda m: _sanitize_name(row[m.group(1)]),
+                self._group_template)
+            #- Two catalog rows naming the same group would each fetch
+            #- into it; keep the first so a click maps to exactly one
+            #- request, and say how many entries that hid -- a template
+            #- missing a distinguishing field otherwise looks like a
+            #- smaller database rather than a naming bug.
+            if name not in self._rows_by_group:
+                self._rows_by_group[name] = row
+                self.groups.append(name)
+            else:
+                collisions += 1
+        if collisions:
+            logger.warning(
+                "source: catalog: %d of %d entries share a group_name with "
+                "an earlier one and are not reachable; add a field that "
+                "tells them apart to '%s'",
+                collisions, len(rows), self._group_template)
+        logger.info("source: catalog lists %d group(s) from %d request(s)",
+                    len(self.groups), self._fetcher.count)
+        return self.groups
+
+    def _from_envelope(self, payload, template, what, sanitize=True):
+        """Fill ``{field}`` from the response's own scalar fields."""
+        scalars = {k: v for k, v in (payload or {}).items()
+                   if isinstance(payload, dict)
+                   and not isinstance(v, (list, dict))}
+
+        def sub(match):
+            key = match.group(1)
+            if key not in scalars:
+                raise ValueError(
+                    "source: catalog: fetch: %s refers to {%s}, which is not "
+                    "a scalar field of the response (available: %s)" % (
+                        what, key, ", ".join(sorted(scalars)) or "none"))
+            value = scalars[key]
+            return _sanitize_name(value) if sanitize else str(
+                "" if value is None else value)
+
+        return _WAVE_FIELD_RE.sub(sub, template)
+
+    def _x_display(self, payload, default):
+        """Label for this group's x column, from the response envelope."""
+        template = self._fetch.get("x_name")
+        if not template:
+            return _sanitize_name(default)
+        return self._from_envelope(payload, template, "x_name")
+
+    def _unit(self, payload):
+        """The y unit for this group, if the spec says where to find it."""
+        template = self._fetch.get("unit")
+        if not template:
+            return None
+        #- Not sanitised: a unit is a label, not a name, so "°C" and
+        #- "%" have to survive intact.
+        return self._from_envelope(payload, str(template), "unit",
+                                   sanitize=False).strip() or None
+
+    def load_group(self, name):
+        """Fetch one group and return it as a wide frame."""
+        row = self._rows_by_group.get(name)
+        if row is None:
+            raise ValueError("source: no catalog entry named '%s'" % name)
+
+        what = "source: catalog: fetch"
+        url = _build_url(self._fetcher.base_url, self._fetch, row, what)
+        payload, resp_headers = self._fetcher.get(url)
+        records = [r for r in _records_of(payload, self._fetch.get("records"),
+                                          url)
+                   if _matches(r, self._fetch.get("where") or {})]
+        for record in records:
+            for col, header in (
+                    self._fetch.get("headers_as_columns") or {}).items():
+                record[col] = resp_headers.get(header)
+        if not records:
+            return pd.DataFrame()
+
+        df = pd.DataFrame.from_records(records)
+        df = _post_process(df, self._fetch, what)
+
+        index_col = self._fetch["index"]
+        x_col = self._fetch["columns"]
+        value_col = self._fetch["values"]
+        for col in (index_col, x_col, value_col):
+            if col not in df.columns:
+                raise ValueError(
+                    "%s: '%s' is not a field of the fetched records "
+                    "(available: %s)" % (
+                        what, col, ", ".join(map(str, df.columns))))
+
+        #- The group's own x column, named after the group so two groups
+        #- swept against different axes can share one frame. What follows
+        #- the marker is the axis label; a spec usually builds it from
+        #- the response envelope (``x_name: "{axis}_{x_label}"``) so a
+        #- unit suffix there drives cicwave's usual axis scaling.
+        x_name = "%s%s%s" % (name, WAVE_X_MARKER,
+                             self._x_display(payload, x_col))
+        wide = df.pivot_table(index=x_col, columns=index_col,
+                              values=value_col, aggfunc="mean",
+                              observed=True)
+        wide.columns = ["%s.%s" % (name, _sanitize_name(c))
+                        for c in wide.columns]
+        wide = wide.reset_index().rename(columns={x_col: x_name})
+        try:
+            wide[x_name] = pd.to_numeric(wide[x_name])
+            wide = wide.sort_values(x_name)
+        except (ValueError, TypeError):
+            pass
+        waves = [c for c in wide.columns if c != x_name]
+        attrs = {"cicwave_wave_x": {c: x_name for c in waves}}
+        unit = self._unit(payload)
+        if unit:
+            attrs["cicwave_wave_unit"] = {c: unit for c in waves}
+        wide.attrs = attrs
+        return wide
 
 
 def is_source_spec_file(path):
@@ -458,7 +773,7 @@ def is_source_spec_file(path):
     Used wherever a path could be either a data file or a spec: the CLI's
     positional argument, and the GUI's open dialog / drag-and-drop.
     """
-    if not os.path.isfile(path):
+    if not (os.path.isfile(path) or _is_url(path)):
         return False
     try:
         from .pivot import load_spec

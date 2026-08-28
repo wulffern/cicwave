@@ -28,7 +28,8 @@ from PySide6.QtGui import (QKeySequence, QFont, QFontDatabase, QShortcut,
 
 import pyqtgraph as pg
 
-from .wavefiles import WaveFile, WaveFiles, parse_unit_from_name, _is_url
+from .wavefiles import (
+    WAVE_X_MARKER, WaveFile, WaveFiles, parse_unit_from_name, _is_url)
 from . import analysis as wave_analysis
 from .theme import THEMES, _get_theme, _set_active_theme
 from matplotlib.ticker import EngFormatter
@@ -323,6 +324,8 @@ class PgWave:
         #- Do not combine with :class:`WaveFile` global twos decode on
         #- the same column (would double-decode).
         self.twos_width_bits = None
+        #- Set by :meth:`reload` when this wave has its own x column.
+        self._row_mask = None
         self.reload()
 
     @staticmethod
@@ -358,11 +361,11 @@ class PgWave:
             else "A" if PgWave._is_i(key) else "")
         return unit
 
-    def _set_x_from_column(self, col, label, unit, logx=False):
+    def _set_x_from_column(self, col, label, unit, logx=False, display=None):
         arr = self.wfile.df[col].to_numpy()
         # Auto-rescale prefixed-SI columns so EngFormatter shows nice
         # prefixes regardless of the unit the data was stored in.
-        parsed = parse_unit_from_name(col)
+        parsed = parse_unit_from_name(display or col)
         if parsed is not None:
             scale, base_unit, clean = parsed
             arr = arr * scale if scale != 1.0 else arr
@@ -379,7 +382,35 @@ class PgWave:
         self.wfile.reload()
         keys = self.wfile.df.columns
 
-        if "time" in keys:
+        attrs = getattr(self.wfile.df, 'attrs', {}) or {}
+
+        #- A source that knows its unit (a REST field, a pivot spec) says
+        #- so here, rather than relying on the column name carrying a
+        #- parseable suffix. This drives the y-axis label and which waves
+        #- share an axis.
+        declared_unit = attrs.get('cicwave_wave_unit', {}).get(self.key)
+        if declared_unit and declared_unit != self.yunit:
+            self.yunit = declared_unit
+            self._yscale = 1.0
+            self.ylabel = "%s (%s)" % (self._yclean or self.key,
+                                       self.wfile.name)
+
+        #- A frame assembled from several sweeps can hold more than one
+        #- x-axis -- one series measured against frequency, another
+        #- against temperature -- so a wave may name its own x column
+        #- instead of sharing the file's. Those sweeps occupy separate
+        #- rows, hence the mask: every other group's rows are NaN here.
+        own_x = attrs.get('cicwave_wave_x', {}).get(self.key)
+        self._row_mask = None
+        if own_x and own_x in keys:
+            self._row_mask = self.wfile.df[own_x].notna().to_numpy()
+            #- Show the axis label the source gave, not the internal
+            #- "<group>::x::<label>" column name.
+            display = str(own_x).split(WAVE_X_MARKER)[-1]
+            self._set_x_from_column(own_x, display, "", display=display)
+            if self.x is not None:
+                self.x = self.x[self._row_mask]
+        elif "time" in keys:
             self._set_x_from_column("time", "Time", "s")
         elif "frequency" in keys:
             self._set_x_from_column("frequency", "Frequency", "Hz",
@@ -404,6 +435,8 @@ class PgWave:
 
         if self.key in keys:
             y = self.wfile.df[self.key].to_numpy()
+            if self._row_mask is not None:
+                y = y[self._row_mask]
             if self._yscale != 1.0 and self._yscale != 1:
                 try:
                     y = y * self._yscale
@@ -822,6 +855,19 @@ class PgWaveBrowser(QWidget):
         self.file_tree.setCurrentItem(item)
         self._fill_waves()
 
+    def openLazyFrame(self, name, groups, loader, pivot_spec_path=None):
+        """Show a catalog of series whose data is fetched when clicked."""
+        f = self.files.openLazyFrame(name, self.xaxis, groups, loader)
+        if pivot_spec_path:
+            f._pivot_spec_path = pivot_spec_path
+            f._original_path = pivot_spec_path
+        f._from_source_spec = True
+        item = QTreeWidgetItem([f.name])
+        item.setData(0, Qt.UserRole, self.files.current)
+        self.file_tree.addTopLevelItem(item)
+        self.file_tree.setCurrentItem(item)
+        self._fill_waves()
+
     def setWaveColor(self, tag, color):
         """Color a wave tree item to match its plot line."""
         item = self._tag_to_item.get(tag)
@@ -941,7 +987,56 @@ class PgWaveBrowser(QWidget):
         return [n for n in f.getWaveNames()
                 if not pattern or re.search(pattern, n, re.IGNORECASE)]
 
-    def _fill_waves(self):
+    def _tree_state(self):
+        """Which scopes are open, and where the view is scrolled to.
+
+        The tree is rebuilt from scratch whenever the wave list changes
+        -- including when a fetched group adds its waves -- so without
+        this every refill would drop the user back to a fully collapsed
+        root and lose their place.
+        """
+        expanded = set()
+
+        def walk(item, prefix):
+            path = prefix + (item.text(0),)
+            if item.isExpanded():
+                expanded.add(path)
+            for i in range(item.childCount()):
+                walk(item.child(i), path)
+
+        for i in range(self.wave_tree.topLevelItemCount()):
+            walk(self.wave_tree.topLevelItem(i), ())
+        current = self.wave_tree.currentItem()
+        return {
+            'expanded': expanded,
+            'scroll': self.wave_tree.verticalScrollBar().value(),
+            'current': current.data(0, Qt.UserRole) if current else None,
+        }
+
+    def _restore_tree_state(self, state, also_expand=()):
+        if not state:
+            return
+        expanded = set(state.get('expanded') or ())
+        expanded.update(also_expand)
+        current_name = state.get('current')
+        to_select = []
+
+        def walk(item, prefix):
+            path = prefix + (item.text(0),)
+            if path in expanded:
+                item.setExpanded(True)
+            if current_name and item.data(0, Qt.UserRole) == current_name:
+                to_select.append(item)
+            for i in range(item.childCount()):
+                walk(item.child(i), path)
+
+        for i in range(self.wave_tree.topLevelItemCount()):
+            walk(self.wave_tree.topLevelItem(i), ())
+        if to_select:
+            self.wave_tree.setCurrentItem(to_select[0])
+        self.wave_tree.verticalScrollBar().setValue(state.get('scroll') or 0)
+
+    def _fill_waves(self, keep_state=None, also_expand=()):
         self.wave_tree.clear()
         self._tag_to_item = {}
         f = self.files.getSelected()
@@ -956,6 +1051,7 @@ class PgWaveBrowser(QWidget):
                 item.setData(0, Qt.UserRole, name)
                 self.wave_tree.addTopLevelItem(item)
                 self._color_if_plotted(item, f, name)
+            self._restore_tree_state(keep_state, also_expand)
             return
 
         root = {}
@@ -975,6 +1071,7 @@ class PgWaveBrowser(QWidget):
                 node[leaf_key] = name
 
         self._build_tree(self.wave_tree, root, f)
+        self._restore_tree_state(keep_state, also_expand)
 
     def _build_tree(self, parent, node, wfile):
         for key in sorted(node.keys()):
@@ -1016,6 +1113,9 @@ class PgWaveBrowser(QWidget):
             item.setExpanded(not item.isExpanded())
             return
         f = self.files.getSelected()
+        if f.isPendingGroup(yname):
+            self._plot_pending_group(f, yname)
+            return
         tag = f.getTag(yname)
         if tag not in self._wave_cache:
             self._wave_cache[tag] = PgWave(f, yname, self.xaxis)
@@ -1025,6 +1125,45 @@ class PgWaveBrowser(QWidget):
             return
         wave.reload()
         self.waveSelected.emit(wave)
+
+    def _plot_pending_group(self, wfile, name):
+        """Fetch a group the first time it is asked for, then plot it.
+
+        A catalog lists series without downloading them, and one fetch
+        usually yields several waves (one per board / device / site), so
+        clicking the group plots all of them and the tree gains the
+        individual names underneath.
+        """
+        state = self._tree_state()
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            added = wfile.loadGroup(name)
+        except Exception as e:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.critical(
+                self, "Fetch", "Failed to fetch %s:\n%s" % (name, e))
+            return
+        finally:
+            if QApplication.overrideCursor() is not None:
+                QApplication.restoreOverrideCursor()
+
+        #- The clicked node just gained children; open it (and the
+        #- scopes above it) so the waves it produced are visible.
+        parts = tuple(self._parse_hierarchy(name))
+        self._fill_waves(
+            keep_state=state,
+            also_expand={parts[:i + 1] for i in range(len(parts))})
+        if not added:
+            QMessageBox.information(
+                self, "Fetch", "%s returned no data." % name)
+            return
+        for wname in added:
+            tag = wfile.getTag(wname)
+            if tag not in self._wave_cache:
+                self._wave_cache[tag] = PgWave(wfile, wname, self.xaxis)
+            wave = self._wave_cache[tag]
+            wave.reload()
+            self.waveSelected.emit(wave)
 
     def currentWave(self):
         """Return the wave currently focused in the wave tree, or
@@ -3331,18 +3470,34 @@ class PgWaveWindow(QMainWindow):
 
     def openSourceSpec(self, spec_path):
         """Fetch and pivot a spec carrying a ``source:`` block."""
-        from .apisource import load_flat_frame
+        from .apisource import LazyCatalog, has_catalog, load_flat_frame
         from .pivot import apply_pivot, load_spec
 
         spec = load_spec(spec_path)
+        #- A spec can be served over HTTP, in which case there is no
+        #- local path to make absolute.
+        spec_ref = (spec_path if _is_url(spec_path)
+                    else os.path.abspath(spec_path))
+
+        if has_catalog(spec):
+            #- Catalog specs list far more than anyone wants downloaded,
+            #- so only the names are read now; the data arrives per group
+            #- when a wave is clicked.
+            catalog = LazyCatalog(spec)
+            groups = catalog.load()
+            self.browser.openLazyFrame(
+                os.path.basename(spec_path), groups, catalog.load_group,
+                pivot_spec_path=spec_ref)
+            return
+
         if not self.browser.xaxis and spec.get('columns'):
             self.browser.xaxis = spec['columns']
         xaxis = self.browser.xaxis or spec.get('columns', '')
         pivoted = apply_pivot(load_flat_frame(spec, None, xaxis=xaxis), spec)
         self.browser.openDataFrame(
             pivoted, "pivot(%s)" % os.path.basename(spec_path),
-            pivot_spec_path=os.path.abspath(spec_path),
-            original_path=os.path.abspath(spec_path),
+            pivot_spec_path=spec_ref,
+            original_path=spec_ref,
             source_spec=True)
 
     def _setup_menus(self):

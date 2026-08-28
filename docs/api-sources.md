@@ -19,7 +19,9 @@ cicwave measurements.yaml
 ```
 
 In the GUI, a spec opens like any data file — **File → Open** it or drag
-it onto the window, and cicwave fetches it.
+it onto the window, and cicwave fetches it. The spec can also
+[live on the service](#letting-the-service-publish-the-spec) rather than
+on your disk.
 
 This is for the shape a REST service usually has, which a plain
 [URL source](/cicwave/url-sources) cannot express:
@@ -31,7 +33,10 @@ This is for the shape a REST service usually has, which a plain
   sweep.
 
 If your endpoint already returns a flat table (CSV, or a JSON array of
-objects), you don't need any of this — just pass the URL.
+objects), you don't need any of this — just pass the URL. And if the
+service holds more than you want to download, a
+[catalog](#catalogs-fetch-when-clicked) builds the wave tree from a
+listing and fetches each series only when you plot it.
 
 Everything a `source:` block contains is data, not code: there is no
 expression language to evaluate, so opening someone else's spec fetches
@@ -170,6 +175,88 @@ filter: {mode: fast}              # a column `where` could not have seen
 Both match exactly, and a list value matches any of its entries. A
 `filter` that matches nothing is an error rather than an empty plot.
 
+## Catalogs: fetch when clicked
+
+Some services hold far more than you want to download. Listing them is
+one request; pulling every sweep can be thousands. A `catalog:` block
+splits the two: the listing builds the wave tree, and a sweep is
+fetched the first time you plot something under it.
+
+```yaml
+source:
+  base_url: http://api.example.com
+  max_requests: 4000
+
+  catalog:
+    requests:                      # the same request machinery as above
+      - path: /v1/series
+        records: rows
+
+    group_name: "{kind}.{station}.{series_id}"
+
+    fetch:                          # run per group, on first plot
+      path: /v1/series/{series_id}/points
+      records: points
+      index: probe                  # one wave per unique value
+      columns: x                    # the sweep axis
+      values: reading
+      x_name: "{axis}_{x_label}"    # label it from the response envelope
+```
+
+Open it like any other spec — `cicwave series.yaml` — and the tree
+appears immediately with nothing downloaded. Double-click a group and
+cicwave fetches it, plots every wave it produced, and adds them to the
+tree underneath.
+
+| Key | Description |
+|-----|-------------|
+| `catalog.requests` | Requests that enumerate the series. The last one's records are the catalog |
+| `catalog.group_name` | Template naming each series, from that record's fields. Dots nest in the tree |
+| `catalog.fetch` | The per-group request: `path`/`url`, `params`, `records`, `where`, plus `rename`/`derive`/`filter` |
+| `catalog.fetch.index` | Field whose unique values become the waves under the group |
+| `catalog.fetch.columns` | Field holding the x value |
+| `catalog.fetch.values` | Field holding the y value |
+| `catalog.fetch.x_name` | Template for the x-axis label, over the response's scalar fields |
+| `catalog.fetch.unit` | Template for the y unit, over the same fields (e.g. `"{param_unit}"`) |
+
+`{field}` in the fetch's `path` and `params` comes from the catalog
+record, the same way `for_each` templating works.
+
+### Units
+
+A service that reports what it measured in (`"unit": "dBm"`) can say so
+with `unit: "{unit}"`, and the plot gets a labelled y-axis without the
+unit having to be smuggled into a column name. Waves sharing a unit
+share a y-axis, as they do for any other source.
+
+### Each group brings its own x-axis
+
+Groups are not required to share a sweep axis. One series measured
+against frequency and another against temperature sit in the same file:
+each group's points are appended as their own rows with their own x
+column, and a wave reads the x it was fetched with. That's what
+`x_name` labels — a name like `frequency_MHz` also gets cicwave's usual
+unit handling, so the axis reads in GHz once the numbers get large.
+
+### What a catalog cannot do
+
+- **Headless export.** `--export` and `--export-data` have nothing to
+  write, because nothing is fetched until a wave is plotted. Narrow the
+  query into a spec with a plain `source:` block to export.
+- **Plot everything.** "Plot all visible waves" skips groups that
+  haven't been fetched rather than issuing one request each — which is
+  the cost the catalog exists to avoid.
+
+`--pivot-info` lists the groups a catalog found, which is the quickest
+way to check a `group_name` template.
+
+### Name every entry
+
+Two records that produce the same `group_name` collapse into one, and
+the second becomes unreachable. cicwave warns when that happens and
+says how many entries were hidden — if you see it, add the field that
+tells them apart (often the test or the unit, not just the id).
+
 ## Provenance
 
 A multi-request pull is only one dataset if every response came from the
@@ -192,6 +279,37 @@ A `for_each` issues one GET per parent row, so a spec with a forgotten
 `max_requests` (default 200) stops the run with a message naming the
 cap rather than quietly hammering the API. Narrow the parent request
 with `where` and `params`, or raise the cap deliberately.
+
+## Letting the service publish the spec
+
+A spec can itself be fetched from a URL, so the service that owns the
+data can hand out the description of how to plot it:
+
+```bash
+cicwave http://api.example.com/cicwave/series.yaml
+```
+
+Nobody has to keep a local copy in step with the API, and a spec served
+this way needs no `base_url` — relative paths resolve against the URL
+the spec came from, so the same spec works from wherever that service is
+reachable.
+
+A positional URL is treated as a spec when it ends in `.yaml`/`.yml`,
+since an extension-less endpoint is just as likely to be serving data.
+`--pivot <url>` says "this is a spec" with no guesswork.
+
+### A fetched spec is not trusted with your secrets
+
+A spec is instructions, not data: it says which hosts to call and what
+headers to send. So a spec that arrived over the network **may not
+expand `${VAR}`** — otherwise opening someone's URL could send a token
+from your environment to a host of their choosing, and cicwave refuses
+with an error naming the header rather than making that request.
+
+A spec on disk is a file you chose to open, and keeps the feature. If
+you need a credential with a published spec, save it locally first.
+
+The [fetch guards](#safety) apply to the spec request too.
 
 ## Secrets
 

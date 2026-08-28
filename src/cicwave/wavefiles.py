@@ -49,6 +49,12 @@ from .stdf import toDataFrame as _stdf_toDataFrame
 
 _URL_RE = re.compile(r'^https?://', re.IGNORECASE)
 
+#- Separates a lazily-fetched group's name from the x column it brought
+#- with it (see ``cicwave_wave_x`` in ``df.attrs``). The part after the
+#- marker is the x-axis label, so a unit suffix there still drives
+#- cicwave's usual auto-scaling.
+WAVE_X_MARKER = "::x::"
+
 
 def _is_url(s):
     return bool(_URL_RE.match(str(s)))
@@ -443,7 +449,8 @@ class WaveFile():
         '.stata', '.dta', '.sas7bdat', '.sav',
     }
 
-    def __init__(self, fname, xaxis, sheet_name=0, df=None, fmt=None):
+    def __init__(self, fname, xaxis, sheet_name=0, df=None, fmt=None,
+                 group_loader=None, groups=()):
         self.xaxis = xaxis
         self.fname = fname
         self.sheet_name = sheet_name
@@ -455,6 +462,14 @@ class WaveFile():
         self._columns = None
         self._virtual = df is not None
         self.fmt = fmt
+        #- Lazy groups: names that are known to exist but whose data has
+        #- not been fetched. A catalog can list far more series than are
+        #- worth downloading up front (see :mod:`cicwave.apisource`), so
+        #- the tree is built from the names and ``group_loader`` is called
+        #- for one group the first time something under it is plotted.
+        self._group_loader = group_loader
+        self._pending_groups = list(groups)
+        self._loaded_groups = set()
         self._remote = (not self._virtual) and _is_url(fname)
         self._remote_bytes = None
         self._remote_content_type = None
@@ -1000,8 +1015,78 @@ class WaveFile():
 
     def getWaveNames(self):
         if self._columns is not None:
-            return self._columns
-        return list(self.df.columns)
+            names = list(self._columns)
+        else:
+            names = list(self.df.columns)
+        #- Unfetched groups are real signals as far as the user is
+        #- concerned; they just have no samples yet.
+        return names + [g for g in self._pending_groups if g not in names]
+
+    def isPendingGroup(self, name):
+        """True if *name* names data that has not been fetched yet."""
+        return name in self._pending_groups
+
+    def loadGroup(self, name):
+        """Fetch one pending group. Returns the wave names it produced.
+
+        The group name itself is usually not a column afterwards -- a
+        fetch typically expands into several waves under it (one per
+        board / device / site), which is why this returns the new names
+        rather than assuming the caller can guess them.
+        """
+        if name in self._loaded_groups or name not in self._pending_groups:
+            return []
+        if self._group_loader is None:
+            raise ValueError("%s has no loader for group '%s'"
+                             % (self.name, name))
+        frame = self._group_loader(name)
+        self._loaded_groups.add(name)
+        if frame is None or frame.empty:
+            #- Leave the name in the tree. A series the catalog lists but
+            #- that holds no samples is a fact about the data; making the
+            #- node disappear on click would read as a bug. It stays in
+            #- ``_loaded_groups`` so clicking again costs no request.
+            return []
+        self._pending_groups.remove(name)
+        #- The group's x column is data, not a signal to plot.
+        x_columns = set(
+            (getattr(frame, 'attrs', {}) or {}).get('cicwave_wave_x', {})
+            .values())
+        added = [c for c in frame.columns
+                 if c not in x_columns
+                 and (self._df is None or c not in self._df.columns)]
+        self._merge_group_frame(frame)
+        for wave in list(self.waves.values()):
+            wave.reload()
+        return added
+
+    def _merge_group_frame(self, frame):
+        """Append a fetched group's rows, widening the frame as needed.
+
+        Groups are concatenated by row rather than joined on x: two
+        sweeps rarely share x values, and a sweep against frequency and
+        one against temperature share nothing at all. Each wave reads
+        its own x column (``cicwave_wave_x``) and ignores the rows that
+        belong to other groups, which are NaN in both.
+        """
+        attrs = dict(getattr(self._df, 'attrs', {}) or {})
+        new_attrs = dict(getattr(frame, 'attrs', {}) or {})
+        #- Per-wave metadata accumulates across groups; a plain update
+        #- would drop the earlier groups' entries.
+        per_wave = {
+            key: dict(attrs.get(key, {}) or {}, **(new_attrs.get(key, {}) or {}))
+            for key in ('cicwave_wave_x', 'cicwave_wave_unit')
+        }
+
+        if self._df is None or self._df.empty:
+            merged = frame.copy()
+        else:
+            merged = pd.concat([self._df, frame], ignore_index=True, sort=False)
+        attrs.update(new_attrs)
+        attrs.update(per_wave)
+        merged.attrs = attrs
+        self._df = merged
+        self._columns = list(merged.columns)
 
     def getWave(self,yname):
 
@@ -1033,6 +1118,14 @@ class WaveFiles(dict):
     def openDataFrame(self, df, name, xaxis):
         key = "::virtual::" + name
         self[key] = WaveFile(name, xaxis, df=df)
+        self.current = key
+        return self[key]
+
+    def openLazyFrame(self, name, xaxis, groups, loader):
+        """Open a file whose series are known but not yet downloaded."""
+        key = "::virtual::" + name
+        self[key] = WaveFile(name, xaxis, df=pd.DataFrame(),
+                             group_loader=loader, groups=groups)
         self.current = key
         return self[key]
 
