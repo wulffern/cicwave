@@ -1,0 +1,31 @@
+#- Where the pull requests of this very repository touched its core
+#- modules. Two endpoints: one lists the pull requests, and one has to
+#- be called per pull request to get the files it changed -- the shape
+#- a `source:` block exists for. Needs no token: these are public.
+source:
+  base_url: https://api.github.com
+  requests:
+    - name: pulls
+      path: /repos/wulffern/cicwave/pulls
+      params: {state: all, per_page: 20}
+      keep: [number]
+
+    - path: /repos/wulffern/cicwave/pulls/{number}/files
+      for_each: pulls
+      params: {per_page: 100}
+      merge: [number]
+      keep: [number, filename, additions]
+
+  #- A pull request touches docs and tests too; the four modules the
+  #- viewer is actually built from are enough to read at a glance.
+  filter:
+    filename:
+      - src/cicwave/cli.py
+      - src/cicwave/wave_pg.py
+      - src/cicwave/wavefiles.py
+      - src/cicwave/pivot.py
+
+index: filename
+columns: number
+values: additions
+unit: lines

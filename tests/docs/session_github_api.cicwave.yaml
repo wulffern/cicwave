@@ -1,0 +1,16 @@
+files:
+  #- No data file: the spec fetches its own rows from the GitHub API.
+  - source: github_api_spec.yaml
+plots:
+  - name: Module churn
+    title: Lines added per pull request, cicwave core modules
+    xlabel: Pull request
+    ylabel: Lines added
+    waves:
+      #- Markers as well as lines: a module touched by one pull request
+      #- and not its neighbours is a single point, which a line cannot
+      #- draw.
+      - {file: 0, name: src/cicwave/cli.py, style: Lines+Markers}
+      - {file: 0, name: src/cicwave/wave_pg.py, style: Lines+Markers}
+      - {file: 0, name: src/cicwave/wavefiles.py, style: Lines+Markers}
+      - {file: 0, name: src/cicwave/pivot.py, style: Lines+Markers}

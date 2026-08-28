@@ -173,3 +173,110 @@ cicwave --session session_url_mortality.cicwave.yaml --export wave_url_mortality
 ```
 
 ![](/cicwave/assets/wave_url_mortality.svg)
+## Real-world data from a REST API
+
+The examples above all start from a file. A pivot spec can instead carry
+a [`source:` block](/cicwave/api-sources) and fetch its own rows over
+HTTP — no data file anywhere.
+
+### Where a repository's pull requests landed
+
+Data: the [GitHub REST API](https://docs.github.com/en/rest), which
+needs no token for a public repository. This is the shape a `source:`
+block is for — the numbers are not in one response:
+
+- `/repos/{owner}/{repo}/pulls` lists the pull requests, and
+- `/repos/{owner}/{repo}/pulls/{number}/files` has to be called once per
+  pull request to get what each one changed.
+
+`for_each` issues that second request per row of the first, `{number}`
+is filled in from the row, and `merge` carries the pull request number
+onto every file it returns. The result is one table: file, pull
+request, lines added.
+
+([`github_api_spec.yaml`](https://github.com/wulffern/cicwave/blob/main/tests/docs/github_api_spec.yaml),
+[`session_github_api.cicwave.yaml`](https://github.com/wulffern/cicwave/blob/main/tests/docs/session_github_api.cicwave.yaml))
+
+```bash
+cicwave github_api_spec.yaml
+```
+
+github_api_spec.yaml:
+```yaml
+#- Where the pull requests of this very repository touched its core
+#- modules. Two endpoints: one lists the pull requests, and one has to
+#- be called per pull request to get the files it changed -- the shape
+#- a `source:` block exists for. Needs no token: these are public.
+source:
+  base_url: https://api.github.com
+  requests:
+    - name: pulls
+      path: /repos/wulffern/cicwave/pulls
+      params: {state: all, per_page: 20}
+      keep: [number]
+
+    - path: /repos/wulffern/cicwave/pulls/{number}/files
+      for_each: pulls
+      params: {per_page: 100}
+      merge: [number]
+      keep: [number, filename, additions]
+
+  #- A pull request touches docs and tests too; the four modules the
+  #- viewer is actually built from are enough to read at a glance.
+  filter:
+    filename:
+      - src/cicwave/cli.py
+      - src/cicwave/wave_pg.py
+      - src/cicwave/wavefiles.py
+      - src/cicwave/pivot.py
+
+index: filename
+columns: number
+values: additions
+unit: lines
+
+```
+
+
+The session that plots it names the spec under `source:` rather than
+`path:`, since there is no data file to name:
+
+session_github_api.cicwave.yaml:
+```yaml
+files:
+  #- No data file: the spec fetches its own rows from the GitHub API.
+  - source: github_api_spec.yaml
+plots:
+  - name: Module churn
+    title: Lines added per pull request, cicwave core modules
+    xlabel: Pull request
+    ylabel: Lines added
+    waves:
+      #- Markers as well as lines: a module touched by one pull request
+      #- and not its neighbours is a single point, which a line cannot
+      #- draw.
+      - {file: 0, name: src/cicwave/cli.py, style: Lines+Markers}
+      - {file: 0, name: src/cicwave/wave_pg.py, style: Lines+Markers}
+      - {file: 0, name: src/cicwave/wavefiles.py, style: Lines+Markers}
+      - {file: 0, name: src/cicwave/pivot.py, style: Lines+Markers}
+
+```
+
+
+Unlike the snapshots above, an API source only means anything if it
+actually fetches — so for the build the *service* is swapped out rather
+than the data:
+[`render_github_api.py`](https://github.com/wulffern/cicwave/blob/main/tests/docs/render_github_api.py)
+replays a recorded copy of those seven GitHub responses
+(`github_api_snapshot.json`) over localhost and points the committed
+spec at it. Every request in the spec is really issued; only `base_url`
+differs from the command above, which talks to GitHub.
+
+```bash
+python3 render_github_api.py wave_github_api.svg
+```
+
+![](/cicwave/assets/wave_github_api.svg)
+Each marker is one pull request touching one module. A module a pull
+request did not touch has no point there, which is why some series are
+dots rather than lines.
