@@ -371,6 +371,62 @@ class TestDeriveAndRename(_ApiTestCase):
         self.assertEqual(list(df["mode"]), ["fast", "slow", "fast"])
         self.assertEqual(list(df["tail"]), ["N04", "N07", "N09"])
 
+    def test_scale_turns_a_magnitude_in_a_name_into_a_signed_axis(self):
+        # Names often encode a magnitude whose sign is implied: a series
+        # measured at -55 is called "..._n55". Without arithmetic the
+        # x-axis comes out mirrored.
+        spec = self.spec("""
+            source:
+              base_url: {base}
+              requests:
+                - path: /api/series
+                  records: rows
+              derive:
+                level: {{from: sensor, regex: "N(\\\\d+)$", type: int,
+                         scale: -1}}
+        """)
+        df = fetch_dataframe(spec)
+        self.assertEqual(list(df["level"]), [-4, -7, -9])
+
+    def test_offset_shifts_the_derived_number(self):
+        spec = self.spec("""
+            source:
+              base_url: {base}
+              requests:
+                - path: /api/series
+                  records: rows
+              derive:
+                shifted: {{from: sensor, regex: "N(\\\\d+)$", type: int,
+                           offset: 100}}
+        """)
+        df = fetch_dataframe(spec)
+        self.assertEqual(list(df["shifted"]), [104, 107, 109])
+
+    def test_scale_works_on_catalog_records_too(self):
+        spec = self.spec(TestLazyCatalog.SPEC)
+        spec["source"]["catalog"]["derive"] = {
+            "level": {"from": "sensor", "regex": r"N(\d+)$", "type": "int",
+                      "scale": -1},
+        }
+        spec["source"]["catalog"]["group_name"] = "{level}"
+        self.assertEqual(LazyCatalog(spec).load(), ["-4", "-7"])
+
+    def test_misspelled_derive_key_is_rejected(self):
+        # Silently ignoring an unknown key here would look like the rule
+        # simply not working.
+        spec = self.spec("""
+            source:
+              base_url: {base}
+              requests:
+                - path: /api/series
+                  records: rows
+              derive:
+                x: {{from: sensor, regex: "N(\\\\d+)$", scal: -1}}
+        """)
+        with self.assertRaises(ValueError) as cm:
+            fetch_dataframe(spec)
+        self.assertIn("scal", str(cm.exception))
+
     def test_rename_of_absent_column_is_an_error(self):
         spec = self.spec("""
             source:

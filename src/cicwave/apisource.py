@@ -367,6 +367,12 @@ def _run_request(req, idx, results, fetcher):
     return out
 
 
+_DERIVE_KEYS = {
+    "from", "regex", "group", "kv", "sep", "assign", "split", "index",
+    "type", "scale", "offset",
+}
+
+
 def _derive_extractor(rule, what):
     """Return ``f(text) -> value`` for one derive rule.
 
@@ -375,6 +381,7 @@ def _derive_extractor(rule, what):
     """
     if not isinstance(rule, dict):
         raise ValueError("%s: must be a mapping" % what)
+    _check_keys(rule, _DERIVE_KEYS, what)
 
     if "regex" in rule:
         pattern = re.compile(str(rule["regex"]))
@@ -423,16 +430,18 @@ def _derive_extractor(rule, what):
     raise ValueError("%s: needs one of 'regex', 'kv' or 'split'" % what)
 
 
-def _cast_value(value, dtype, what):
-    if dtype in (None, "str"):
+def _cast_value(value, dtype, what, scale=None, offset=None):
+    if dtype in (None, "str") and scale is None and offset is None:
         return value
-    if dtype not in ("int", "float"):
+    if dtype not in (None, "int", "float", "str"):
         raise ValueError(
             "%s: unknown type '%s' (int, float or str)" % (what, dtype))
     try:
         number = float(value)
     except (TypeError, ValueError):
         return None
+    number = number * float(1 if scale is None else scale)
+    number = number + float(0 if offset is None else offset)
     return int(number) if dtype == "int" else number
 
 
@@ -449,8 +458,13 @@ def _derive_series(df, name, rule):
     out = df[src].astype(str).map(_derive_extractor(rule, what))
 
     dtype = rule.get("type")
-    if dtype in ("int", "float"):
+    scale, offset = rule.get("scale"), rule.get("offset")
+    if dtype in ("int", "float") or scale is not None or offset is not None:
         out = pd.to_numeric(out, errors="coerce")
+        if scale is not None:
+            out = out * float(scale)
+        if offset is not None:
+            out = out + float(offset)
         if dtype == "int":
             out = out.astype("Int64")
     elif dtype not in (None, "str"):
@@ -473,13 +487,14 @@ def _derive_records(rows, derive, what):
             raise ValueError("%s: needs a 'from' field" % rule_what)
         extract = _derive_extractor(rule, rule_what)
         dtype = rule.get("type")
+        scale, offset = rule.get("scale"), rule.get("offset")
         for row in rows:
             if src not in row:
                 raise ValueError(
                     "%s: field '%s' is not in the records (available: %s)" % (
                         rule_what, src, ", ".join(sorted(row)) or "none"))
             value = extract("" if row[src] is None else str(row[src]))
-            row[name] = _cast_value(value, dtype, rule_what)
+            row[name] = _cast_value(value, dtype, rule_what, scale, offset)
     return rows
 
 
