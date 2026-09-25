@@ -85,6 +85,7 @@ slope, and derivative values at both cursor positions.
   - Histogram (distribution with Gaussian fit, mean/sigma)
   - Differentiate (numerical dy/dx)
   - X vs Y (parametric plot with regex signal picker)
+  - Constellation (IQ scatter with symbol timing and carrier-offset correction)
 - Signal names with dotted hierarchy (e.g. `v(xdut.x1.out)`) are shown as
   a collapsible tree organized by instance path
 - Use the **Flat** checkbox to switch to a flat list view
@@ -135,6 +136,22 @@ Right-click a trace in the wave tree for the analysis menu:
 - **Histogram**: distribution + Gaussian fit
 - **Differentiate (dy/dx)**: numerical derivative
 - **Linear fit…**, **Difference (this − other)…**, **X vs Y…**
+- **Constellation (IQ)…**: I/Q scatter of a complex `iq` column, or of an
+  `I` column paired with its `Q` (picked for you when the names match).
+  Set the sample rate (prefilled from SigMF / `.npz` sidecar / `.iqvsa`
+  metadata or the time axis), a symbol rate to take one point per symbol
+  (fractional samples per symbol are fine), a timing offset in samples to
+  land on the symbol centre, and a frequency offset (Hz) and phase to
+  derotate a radio's carrier offset. For SigMF recordings with
+  annotations, pick an annotated range (the first complete one is
+  preselected) so the idle gaps stay out. Any labelled range works, so a
+  recording whose metadata also annotates the sections of each packet
+  (`"core:label": "header"`, `"payload"`, ...) shows each section's
+  constellation on its own; cicwave needs no knowledge of the protocol.
+  A window start/stop in µs narrows the selection further; low-IF captures prefill the channel
+  offset and the spectrum-inverted flag. Optionally draws the trajectory
+  behind the symbols; the analysis itself is
+  `cicwave.analysis.constellation()`
 - **2's complement decode** submenu: 8 / 10 / 12 / 16-bit signed
 - **Math expressions**: create derived signals
 - **Digital analysis**: bus values and timing

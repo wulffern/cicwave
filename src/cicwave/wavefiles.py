@@ -37,7 +37,6 @@ import urllib.parse
 import urllib.request
 import numpy as np
 import pandas as pd
-from matplotlib.ticker import EngFormatter
 
 from .ngraw import toDataFrame as _ngraw_toDataFrame
 from .stdf import toDataFrame as _stdf_toDataFrame
@@ -136,6 +135,17 @@ def fetch_url_bytes(url, headers=None, timeout=_URL_TIMEOUT_S,
             "failed to fetch %s: HTTP %s %s" % (url, e.code, e.reason)) from e
     except urllib.error.URLError as e:
         raise ValueError("failed to fetch %s: %s" % (url, e.reason)) from e
+    except TimeoutError as e:
+        #- A read timeout (as opposed to a connect timeout) arrives as a
+        #- bare TimeoutError, whose str() is just "timed out" -- no URL,
+        #- nothing to act on. Say what was being fetched and for how long
+        #- we waited, so a slow service is not mistaken for a bad path.
+        raise ValueError(
+            "failed to fetch %s: no response within %gs. The service may be "
+            "slow or rebuilding; raise 'timeout' in the spec to wait longer."
+            % (url, timeout)) from e
+    except OSError as e:
+        raise ValueError("failed to fetch %s: %s" % (url, e)) from e
     if len(data) > max_bytes:
         raise ValueError(
             "%s exceeds the %d MB download limit" %
@@ -360,6 +370,9 @@ class Wave():
         else:
             self.line, = ax.plot(y,label=self.ylabel)
 
+        #- matplotlib is imported on use so opening the viewer doesn't pay
+        #- for it; this path only runs when drawing onto a matplotlib axis.
+        from matplotlib.ticker import EngFormatter
         if self.xunit:
             ax.xaxis.set_major_formatter(EngFormatter(unit=self.xunit))
         if self.yunit:
@@ -445,6 +458,7 @@ class WaveFile():
     #- anyway (lab-instrument formats, not climate/health datasets).
     _REMOTE_UNSUPPORTED_EXTS = {
         '.raw', '.vcd', '.iqvsa', '.prn', '.npz', '.stdf', '.u32',
+        '.sigmf-meta', '.sigmf-data', '.sigmf',
         '.dat', '.spe', '.cou', '.chi',
         '.stata', '.dta', '.sas7bdat', '.sav',
     }
@@ -612,6 +626,9 @@ class WaveFile():
         '.feather': lambda self: pd.read_feather(self.fname),
         '.npz':     lambda self: read_npz(self.fname),
         '.u32':     lambda self: read_u32(self.fname),
+        '.sigmf-meta': lambda self: read_sigmf(self.fname),
+        '.sigmf-data': lambda self: read_sigmf(self.fname),
+        '.sigmf':   lambda self: read_sigmf(self.fname),
         '.h5':      lambda self: pd.read_hdf(self.fname),
         '.hdf5':    lambda self: pd.read_hdf(self.fname),
         '.html':    lambda self: pd.read_html(self.fname)[0],
@@ -624,11 +641,22 @@ class WaveFile():
     }
 
     def _read_file(self):
+        #- Plugins (cicwave.plugins) may label or extend what was read.
+        from . import plugins as _plugins
+        return _plugins.run_annotators(self._read_raw(), self.fname)
+
+    def _read_raw(self):
         if self._remote:
             return self._apply_twos_decode_df(self._read_remote_file())
+        from . import plugins as _plugins
+        plugin_reader = _plugins.find_reader(self.fname)
+        if plugin_reader is not None:
+            return self._apply_twos_decode_df(plugin_reader(self.fname))
         lower = self.fname.lower()
         if lower.endswith('.stdf') or lower.endswith('.stdf.gz'):
             return self._apply_twos_decode_df(_stdf_toDataFrame(self.fname))
+        if lower.endswith('.sigmf-data.zip'):
+            return self._apply_twos_decode_df(read_sigmf(self.fname))
         ext = os.path.splitext(self.fname)[1].lower()
         reader = self.PANDAS_READERS.get(ext)
         if reader:
@@ -1875,4 +1903,329 @@ def read_iqvsa(fname):
         'header_xml': header_xml,
         'config': cfg,
     }
+    return df
+
+
+# ---------------------------------------------------------------------------
+# SigMF recordings (.sigmf-meta + .sigmf-data, or a .sigmf archive)
+# ---------------------------------------------------------------------------
+
+#- ``core:datatype`` is ``[c|r][f|i|u]<bits>[_le|_be]``, e.g. ``cf32_le``,
+#- ``ci16_le``, ``ru8``. 8-bit types carry no endianness suffix.
+_SIGMF_DATATYPE_RE = re.compile(
+    r'^(?P<cr>[cr])(?P<kind>[fiu])(?P<bits>8|16|32|64)(?:_(?P<end>le|be))?$')
+
+
+def _sigmf_dtype(datatype):
+    """Return ``(numpy scalar dtype, is_complex)`` for a SigMF datatype."""
+    m = _SIGMF_DATATYPE_RE.match((datatype or '').strip().lower())
+    if not m:
+        raise ValueError("sigmf: unsupported core:datatype %r" % datatype)
+    kind, bits = m.group('kind'), int(m.group('bits'))
+    if kind == 'f' and bits not in (32, 64):
+        raise ValueError("sigmf: unsupported core:datatype %r" % datatype)
+    if bits > 8 and not m.group('end'):
+        raise ValueError(
+            "sigmf: core:datatype %r needs an _le/_be suffix" % datatype)
+    order = {'le': '<', 'be': '>'}.get(m.group('end'), '|')
+    dtype = np.dtype('%s%s%d' % (order, kind, bits // 8))
+    return dtype, m.group('cr') == 'c'
+
+
+def _sigmf_paths(fname):
+    """Map either half of a recording to ``(meta_path, data_path)``.
+
+    The data half may also be given zipped (``<name>.sigmf-data.zip``).
+    """
+    lower = fname.lower()
+    if lower.endswith('.sigmf-data.zip'):
+        base = fname[:-len('.sigmf-data.zip')]
+    else:
+        base, ext = os.path.splitext(fname)
+        if ext.lower() not in ('.sigmf-meta', '.sigmf-data'):
+            base = fname
+    return base + '.sigmf-meta', base + '.sigmf-data'
+
+
+def _sigmf_read_dataset(data_path):
+    """Return the raw sample bytes of *data_path*, unzipping if need be.
+
+    Recordings are often shipped with the (large, compressible) dataset
+    zipped next to the metadata: ``<name>.sigmf-data.zip`` holding
+    ``<name>.sigmf-data``. That is read straight from the ZIP, so it never
+    has to be unpacked on disk. Returns ``None`` when neither form exists.
+    """
+    import zipfile
+
+    if os.path.exists(data_path) and not data_path.lower().endswith('.zip'):
+        with open(data_path, 'rb') as fh:
+            return fh.read()
+    zpath = data_path if data_path.lower().endswith('.zip')         else data_path + '.zip'
+    if not os.path.exists(zpath):
+        return None
+    with zipfile.ZipFile(zpath) as zf:
+        names = [i.filename for i in zf.infolist() if not i.is_dir()]
+        want = os.path.basename(zpath)[:-len('.zip')]
+        member = next((n for n in names
+                       if os.path.basename(n) == want), None)
+        if member is None:
+            data = [n for n in names if n.lower().endswith('.sigmf-data')]
+            if len(data) != 1 and len(names) != 1:
+                raise ValueError(
+                    "sigmf: %s should hold one .sigmf-data member, found %s"
+                    % (os.path.basename(zpath), ", ".join(names) or "none"))
+            member = data[0] if len(data) == 1 else names[0]
+        return zf.read(member)
+
+
+def _sigmf_samples(payload, meta):
+    """Decode the raw dataset bytes into an ``(n, channels)`` array."""
+    glob = meta.get('global') or {}
+    dtype, is_complex = _sigmf_dtype(glob.get('core:datatype'))
+    nch = int(glob.get('core:num_channels') or 1)
+    per_sample = dtype.itemsize * (2 if is_complex else 1) * nch
+
+    #- A capture segment may declare ``core:header_bytes`` of non-sample
+    #- data in front of its samples (non-conforming datasets). Cut those
+    #- out segment by segment so the samples line up again.
+    captures = sorted(meta.get('captures') or [],
+                      key=lambda c: int(c.get('core:sample_start') or 0))
+    if any(c.get('core:header_bytes') for c in captures):
+        chunks, pos = [], 0
+        for i, cap in enumerate(captures):
+            pos += int(cap.get('core:header_bytes') or 0)
+            if i + 1 < len(captures):
+                n = (int(captures[i + 1].get('core:sample_start') or 0)
+                     - int(cap.get('core:sample_start') or 0))
+                end = pos + n * per_sample
+            else:
+                end = len(payload)
+            chunks.append(payload[pos:end])
+            pos = end
+        payload = b''.join(chunks)
+
+    trailing = int(glob.get('core:trailing_bytes') or 0)
+    if trailing:
+        payload = payload[:len(payload) - trailing]
+    #- A capture cut short mid-sample: keep the whole samples rather than
+    #- refusing the file.
+    payload = payload[:len(payload) - len(payload) % per_sample]
+
+    raw = np.frombuffer(payload, dtype=dtype)
+    real_type = np.float64 if dtype.itemsize == 8 else np.float32
+    #- Integer counts with a vendor scale factor to physical units: apply
+    #- it, so e.g. LitePoint captures read in analyser units rather than
+    #- int16 counts. SigMF core has no such field.
+    try:
+        scale = float(glob.get('litepoint:scale', 1.0))
+    except (TypeError, ValueError):
+        scale = 1.0
+    if is_complex:
+        pairs = raw.reshape(-1, 2)
+        #- Build the complex array in place: ``I + 1j*Q`` would allocate
+        #- several full-size temporaries, which adds up at 10+ M samples.
+        samples = np.empty(pairs.shape[0],
+                           np.complex128 if real_type is np.float64
+                           else np.complex64)
+        samples.real = pairs[:, 0]
+        samples.imag = pairs[:, 1]
+    else:
+        samples = raw.astype(real_type)
+    if scale != 1.0 and np.isfinite(scale):
+        samples *= samples.real.dtype.type(scale)
+    return samples.reshape(-1, nch)
+
+
+def _sigmf_read_archive(fname):
+    """Return ``(meta, payload)`` for the first recording in a ``.sigmf`` tar."""
+    import json
+    import tarfile
+
+    with tarfile.open(fname, 'r:*') as tar:
+        members = {m.name: m for m in tar.getmembers() if m.isfile()}
+        metas = sorted(n for n in members if n.lower().endswith('.sigmf-meta'))
+        if not metas:
+            raise ValueError("sigmf: no .sigmf-meta inside %s" % fname)
+        meta_name = metas[0]
+        meta = json.load(tar.extractfile(members[meta_name]))
+        data_name = meta_name[:-len('.sigmf-meta')] + '.sigmf-data'
+        if data_name not in members:
+            raise ValueError("sigmf: %s has no %s next to %s" % (
+                fname, os.path.basename(data_name),
+                os.path.basename(meta_name)))
+        payload = tar.extractfile(members[data_name]).read()
+    return meta, payload
+
+
+def _sigmf_power_column(glob):
+    """``(unit, offset_db)`` for the power view of a recording's samples.
+
+    Power is ``10*log10(|z|^2) + offset_db``. LitePoint transmitter
+    captures are in analyser units where ``|z|^2`` is mW to within
+    ``litepoint:iq_power_offset_db``, so that gives dBm (and matches the
+    ``litepoint:mean_dbm`` of their annotations). Raw ADC counts with a
+    stated full scale give dBFS; anything else is plain dB re 1 unit^2.
+    """
+    units = str(glob.get('litepoint:units') or '')
+    if 'count' in units.lower():
+        m = re.search(r'full\s*scale\s*([0-9.eE+]+)', units)
+        if m:
+            try:
+                return 'dBFS', -20.0 * np.log10(float(m.group(1)))
+            except ValueError:
+                pass
+        return 'dB', 0.0
+    if 'litepoint:scale' in glob:
+        try:
+            return 'dBm', float(glob.get('litepoint:iq_power_offset_db') or 0.0)
+        except (TypeError, ValueError):
+            return 'dBm', 0.0
+    return 'dB', 0.0
+
+
+
+_SYMBOL_RATE_RE = re.compile(
+    r'([0-9]+(?:\.[0-9]+)?)\s*([kMG]?)(?:sym/s|sps|Bd|baud)\b')
+
+
+def _sigmf_symbol_rate(glob):
+    """Symbol rate (Hz) stated in the metadata's modulation text, or None.
+
+    Neither SigMF core nor the LitePoint extension has a field for it, but
+    ``litepoint:modulation`` spells it out (``"8PSK, 2 Msym/s"``); using it
+    saves typing it into the constellation dialog.
+    """
+    text = str(glob.get('litepoint:modulation') or '')
+    m = _SYMBOL_RATE_RE.search(text)
+    if not m:
+        return None
+    return float(m.group(1)) * {'': 1.0, 'k': 1e3, 'M': 1e6, 'G': 1e9}[m.group(2)]
+
+
+def _power_db(z, offset_db=0.0):
+    """``10*log10(|z|^2) + offset_db`` as float32; exact zeros become NaN
+    (a gap in the trace) rather than -inf, which would wreck autoscaling."""
+    p = (z.real.astype(np.float32) ** 2 + z.imag.astype(np.float32) ** 2
+         if np.iscomplexobj(z) else np.square(z, dtype=np.float32))
+    with np.errstate(divide='ignore'):
+        out = 10.0 * np.log10(p)
+    out[~np.isfinite(out)] = np.nan
+    if offset_db:
+        out += np.float32(offset_db)
+    return out
+
+
+def read_sigmf(fname):
+    """Load a SigMF recording into a pandas DataFrame.
+
+    Accepts either half of a ``.sigmf-meta`` / ``.sigmf-data`` pair, or a
+    ``.sigmf`` archive (its first recording). The dataset may be zipped as
+    ``<name>.sigmf-data.zip``; it is read from the ZIP without unpacking.
+    ``litepoint:scale``, when present, converts integer counts to physical
+    units. Complex datatypes give a
+    complex ``iq`` column plus real ``I`` and ``Q`` columns -- the plot shows
+    real values, while the FFT uses ``iq`` for a two-sided spectrum. Real
+    datatypes give a ``value`` column. Every channel also gets a magnitude
+    view: ``mag`` (``|iq|``, complex only) and ``power_<unit>``, the power
+    in dB -- dBm for LitePoint analyser captures, dBFS for ADC counts with
+    a stated full scale, else dB re 1 unit^2. Multi-channel recordings
+    suffix each column with ``_ch<k>`` (before the unit, for power). Without
+    a scale factor, integer samples are kept as raw counts.
+
+    With ``core:sample_rate`` there is a ``time`` column in seconds, else a
+    ``sample`` index. The rate and the first capture's ``core:frequency``
+    go in ``df.attrs['cicwave_iq']`` so the FFT is labelled at the real
+    carrier (allowing for ``litepoint:channel_offset_hz`` and
+    ``litepoint:spectrum_inverted`` on low-IF captures); the metadata itself
+    is kept in ``df.attrs['cicwave_sigmf']``.
+    """
+    import json
+
+    if os.path.splitext(fname)[1].lower() == '.sigmf':
+        meta, payload = _sigmf_read_archive(fname)
+    else:
+        meta_path, data_path = _sigmf_paths(fname)
+        if not os.path.exists(meta_path):
+            raise ValueError("sigmf: missing metadata file %s" % meta_path)
+        with open(meta_path, 'r', encoding='utf-8') as fh:
+            meta = json.load(fh)
+        glob = (meta.get('global') or {}) if isinstance(meta, dict) else {}
+        if glob.get('core:metadata_only'):
+            raise ValueError("sigmf: %s is metadata-only (no samples)"
+                             % os.path.basename(meta_path))
+        #- Non-conforming datasets name their own data file.
+        if glob.get('core:dataset'):
+            data_path = os.path.join(os.path.dirname(meta_path),
+                                     glob['core:dataset'])
+        payload = _sigmf_read_dataset(data_path)
+        if payload is None:
+            raise ValueError("sigmf: missing dataset file %s (or %s.zip)"
+                             % (data_path, os.path.basename(data_path)))
+
+    if not isinstance(meta, dict):
+        raise ValueError("sigmf: metadata in %s is not a JSON object" % fname)
+    glob = meta.get('global') or {}
+    samples = _sigmf_samples(payload, meta)
+    n, nch = samples.shape
+
+    cols = {}
+    try:
+        fs = float(glob.get('core:sample_rate'))
+    except (TypeError, ValueError):
+        fs = None
+    if fs is not None and np.isfinite(fs) and fs > 0:
+        cols['time'] = np.arange(n, dtype=np.float64) / fs
+    else:
+        fs = None
+        cols['sample'] = np.arange(n, dtype=np.float64)
+    power_unit, power_offset = _sigmf_power_column(glob)
+    for k in range(nch):
+        sfx = '_ch%d' % k if nch > 1 else ''
+        s = samples[:, k]
+        if np.iscomplexobj(s):
+            cols['iq' + sfx] = s
+            cols['I' + sfx] = s.real
+            cols['Q' + sfx] = s.imag
+            #- Magnitude views: the envelope, and the same in dB - which
+            #- is what shows burst ramps and power levels at a glance.
+            cols['mag' + sfx] = np.abs(s)
+        else:
+            cols['value' + sfx] = s
+        #- Unit last so the axis formatter picks it up: ``power_ch0_dBm``.
+        cols['power%s_%s' % (sfx, power_unit)] = _power_db(s, power_offset)
+    df = pd.DataFrame(cols)
+
+    captures = meta.get('captures') or []
+    info = {}
+    if fs is not None:
+        info['samp_rate_hz'] = fs
+    try:
+        center = float(captures[0].get('core:frequency'))
+    except (IndexError, TypeError, ValueError, AttributeError):
+        center = None
+    if center is not None and np.isfinite(center):
+        inverted = bool(glob.get('litepoint:spectrum_inverted'))
+        try:
+            ch_off = float(glob.get('litepoint:channel_offset_hz') or 0.0)
+        except (TypeError, ValueError):
+            ch_off = 0.0
+        info['center_hz'] = center + ch_off if inverted else center - ch_off
+        if inverted:
+            info['spectrum_inverted'] = True
+        if ch_off:
+            info['channel_offset_hz'] = ch_off
+    symbol_rate = _sigmf_symbol_rate(glob)
+    if symbol_rate:
+        info['symbol_rate_hz'] = symbol_rate
+    if info:
+        df.attrs['cicwave_iq'] = info
+    anns = list(meta.get('annotations') or [])
+    df.attrs['cicwave_sigmf'] = {
+        'global': glob,
+        'captures': captures,
+        'annotations': anns,
+    }
+    #- The generic list plugins' annotators append to (see
+    #- cicwave.plugins.annotations); starts as the file's own.
+    df.attrs['cicwave_annotations'] = anns
     return df

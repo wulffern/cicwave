@@ -29,6 +29,8 @@ __all__ = [
     "linear_fit",
     "LinearFitResult",
     "difference",
+    "constellation",
+    "ConstellationResult",
     "run_analysis_steps",
     "AnalysisRunResult",
 ]
@@ -711,6 +713,85 @@ def difference(
     if n == 0:
         return np.array([], dtype=np.float64)
     return a[:n] - b[:n]
+
+
+@dataclass(frozen=True)
+class ConstellationResult:
+    points: np.ndarray        # complex symbol (or sample) decisions
+    samples_per_symbol: float  # 1.0 when no symbol rate was given
+    offset_samples: float
+    freq_offset_hz: float
+    rms: float                # RMS magnitude before normalisation
+
+
+def constellation(
+        iq: np.ndarray,
+        *,
+        fs: Optional[float] = None,
+        symbol_rate: Optional[float] = None,
+        offset: float = 0.0,
+        freq_offset_hz: float = 0.0,
+        phase_deg: float = 0.0,
+        conjugate: bool = False,
+        start_sample: int = 0,
+        normalize: bool = True) -> ConstellationResult:
+    """Pick constellation points out of a complex baseband capture.
+
+    *freq_offset_hz* is the carrier offset to remove: the capture is
+    derotated by ``exp(-j·2π·f·t)`` (needs *fs*), then turned by
+    *phase_deg*; *conjugate* then mirrors Q, undoing a spectrum-inverted
+    receiver. With *symbol_rate* the result holds one point per symbol,
+    taken at sample ``offset + k·fs/symbol_rate`` (rounded, so fractional
+    samples per symbol work); without it every sample from *offset* on is
+    returned, which shows the trajectory. *normalize* scales the points to
+    unit RMS magnitude so constellations from different gains overlay.
+    *start_sample* is where *iq* begins in the whole recording: the
+    derotation runs on the recording's time base, so a phase found for one
+    part of a capture still holds when another part is selected.
+    """
+    z = np.asarray(iq)
+    if not np.iscomplexobj(z):
+        raise ValueError("constellation needs complex IQ samples")
+    z = z.astype(np.complex128)
+    fs = float(fs) if fs else None
+    if freq_offset_hz or symbol_rate:
+        if fs is None or not np.isfinite(fs) or fs <= 0:
+            raise ValueError(
+                "a sample rate is needed for a symbol rate or a "
+                "frequency offset")
+    if freq_offset_hz:
+        t = (np.arange(z.size, dtype=np.float64) + int(start_sample)) / fs
+        z = z * np.exp(-2j * np.pi * float(freq_offset_hz) * t)
+    if phase_deg:
+        z = z * np.exp(-1j * np.deg2rad(float(phase_deg)))
+    if conjugate:
+        z = np.conj(z)
+
+    offset = float(offset or 0.0)
+    if offset < 0:
+        raise ValueError("offset must be >= 0 samples")
+    if symbol_rate:
+        sps = fs / float(symbol_rate)
+        if sps < 1.0:
+            raise ValueError(
+                "symbol rate %.6g Hz is above the sample rate %.6g Hz"
+                % (symbol_rate, fs))
+        count = int(np.floor((z.size - 1 - offset) / sps)) + 1 \
+            if z.size > offset else 0
+        idx = np.rint(offset + np.arange(max(count, 0)) * sps).astype(np.int64)
+        idx = idx[idx < z.size]
+        pts = z[idx]
+    else:
+        sps = 1.0
+        pts = z[int(round(offset)):]
+
+    pts = pts[np.isfinite(pts)]
+    rms_mag = float(np.sqrt(np.mean(np.abs(pts) ** 2))) if pts.size else 0.0
+    if normalize and rms_mag > 0:
+        pts = pts / rms_mag
+    return ConstellationResult(
+        points=pts, samples_per_symbol=float(sps), offset_samples=offset,
+        freq_offset_hz=float(freq_offset_hz or 0.0), rms=rms_mag)
 
 
 @dataclass

@@ -4,6 +4,7 @@
 import http.server
 import json
 import threading
+import time
 import unittest
 
 from cicwave.wavefiles import WaveFile, _is_url, _check_not_link_local
@@ -26,6 +27,14 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         elif self.path == "/rest-tsv":
             # Extension-less, tab-separated: needs --format txt/tsv.
             self._send(b"time\tv\n0\t1\n1\t2\n", "application/octet-stream")
+        elif self.path == "/slow":
+            # Headers, then a stall: reproduces a read timeout.
+            self.send_response(200)
+            self.send_header("Content-Type", "text/csv")
+            self.end_headers()
+            self.wfile.write(b"time,v\n")
+            self.wfile.flush()
+            time.sleep(5)
         elif self.path == "/data.pkl":
             self._send(b"not a real pickle", "application/octet-stream")
         else:
@@ -99,6 +108,19 @@ class TestUrlSource(unittest.TestCase):
         with self.assertRaises(ValueError) as cm:
             WaveFile(self.base + "/data.pkl", xaxis="x")
         self.assertIn("deserialization", str(cm.exception))
+
+    def test_read_timeout_names_the_url_and_the_wait(self):
+        # A read timeout surfaces as a bare TimeoutError whose message is
+        # just "timed out". Unqualified, that reads like a bad path
+        # rather than a slow service.
+        from cicwave.wavefiles import fetch_url_bytes
+
+        with self.assertRaises(ValueError) as cm:
+            fetch_url_bytes(self.base + "/slow", timeout=0.4)
+        message = str(cm.exception)
+        self.assertIn("/slow", message)
+        self.assertIn("0.4s", message)
+        self.assertIn("timeout", message)
 
     def test_unreachable_host_raises_clear_error(self):
         # Port 1 on loopback should refuse the connection immediately.

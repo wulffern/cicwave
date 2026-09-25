@@ -39,6 +39,7 @@ repo. As such, you're here.
   - Pickle (`.pkl`) for cached DataFrames
   - VCD digital waveforms 
   - LitePoint `.iqvsa` IQ capture files
+  - SigMF IQ recordings (`.sigmf-meta` + `.sigmf-data`, or `.sigmf` archives)
   - STDF (`.stdf`, `.stdf.gz`) semiconductor ATE test results
   - Raw `uint32` counter captures (`.u32`) with a JSON sidecar
   - Statistical formats: Stata (`.dta`), SAS (`.sas7bdat`), SPSS (`.sav`)
@@ -157,6 +158,7 @@ through to the ngspice raw reader, so non-standard suffixes (e.g. `.raw0`,
 | Whitespace text | `.dat`, `.spe`, `.cou`, `.chi` | Eldo `.cou`/`.chi`, ngspice `.dat`, generic space/tab columns; `#` comments stripped by default |
 | VCD | `.vcd` | Value Change Dump — digital simulation waveforms |
 | LitePoint IQ | `.iqvsa` | LitePoint IQxstream / IQfact IQ capture data |
+| SigMF | `.sigmf-meta`, `.sigmf-data`, `.sigmf-data.zip`, `.sigmf` | SigMF recordings (open either half of the pair, or a `.sigmf` archive). A zipped dataset (`<name>.sigmf-data.zip`) is read in place without unpacking. `litepoint:scale` converts counts to analyser units; `litepoint:channel_offset_hz` / `litepoint:spectrum_inverted` put a low-IF capture's FFT on the RF axis. Each recording also gets magnitude views: `mag` (\|iq\|) and `power_dBm` (dBm for LitePoint analyser captures, matching their burst annotations), `power_dBFS` (ADC counts with a stated full scale) or `power_dB`. All `core:datatype`s (`cf32_le`, `ci16_le`, `cu8`, `rf64_be`, …), multi-channel and per-capture header bytes. Gives a complex `iq` column plus `I`/`Q`, a `time` axis from `core:sample_rate`, and the FFT is centred on the first capture's `core:frequency` |
 | STDF | `.stdf`, `.stdf.gz` | Semiconductor ATE test results (SEMI E10/V4) — parametric (PTR) results per part/site, gzip auto-detected |
 | Raw counter | `.u32` | Bare little-endian `uint32` counter records with a `.meta.json` sidecar giving the tick length and periods per sample; converted to Hz or ns on load, with the dead time between capture chunks preserved |
 

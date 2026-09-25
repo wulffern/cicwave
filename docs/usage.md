@@ -23,7 +23,7 @@ Usage: cicwave [OPTIONS] [FILES]...
 
   Supports: .raw, .csv, .tsv, .xlsx, .json, .parquet, .feather, .npz, .h5,
   .pkl, .vcd (digital), .iqvsa (LitePoint), .stdf (ATE), .u32 (raw counter
-  captures), and more.
+  captures), .sigmf-meta/.sigmf (SigMF IQ), and more.
 
   URL sources:
     cicwave https://example.com/data.csv    Any http(s) URL works directly
@@ -224,9 +224,13 @@ CSV/TSV/Excel files into the viewer at once. Selecting "Plot all visible
 waves" or "Plot for all files" then triggers the full parse only for the
 files you actually plot.
 
-When `PyOpenGL` is installed (it is by default), the pyqtgraph backend
-uses GPU-accelerated rendering, which keeps zoom/pan responsive even with
-hundreds of curves on screen. Display-time downsampling (lossless,
+When `PyOpenGL` is installed (it is by default), a plot switches to
+GPU-accelerated rendering once it holds 20 or more curves, which keeps
+zoom/pan responsive even with hundreds of curves on screen. Plots with
+fewer curves use the raster renderer, so the viewer starts faster (the
+OpenGL context is only created when it is needed). Set
+`CICSIM_USE_OPENGL=1` to use OpenGL from the start, or `0` to never use
+it. Display-time downsampling (lossless,
 viewport-aware) is enabled automatically.
 
 ## Environment variables

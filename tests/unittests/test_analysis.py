@@ -305,5 +305,67 @@ class TestPreprocessDataframe(unittest.TestCase):
         self.assertAlmostEqual(out["code"].iloc[1], -128.0)
 
 
+class TestConstellation(unittest.TestCase):
+    #- QPSK at 4 samples per symbol, symbol held for the whole symbol
+    #- except its first sample, so only offsets 1..3 land on a clean point.
+    SYMS = np.array([1 + 1j, -1 + 1j, -1 - 1j, 1 - 1j] * 8) / np.sqrt(2)
+
+    def _signal(self, fs=4e6, cfo=0.0):
+        z = np.repeat(self.SYMS, 4).astype(complex)
+        z[::4] = 0  # a transition sample at each symbol start
+        t = np.arange(z.size) / fs
+        return z * np.exp(2j * np.pi * cfo * t)
+
+    def test_symbol_sampling_with_offset(self):
+        res = analysis.constellation(
+            self._signal(), fs=4e6, symbol_rate=1e6, offset=2)
+        self.assertEqual(res.samples_per_symbol, 4.0)
+        np.testing.assert_allclose(res.points, self.SYMS, atol=1e-12)
+
+    def test_frequency_offset_is_removed(self):
+        res = analysis.constellation(
+            self._signal(cfo=10e3), fs=4e6, symbol_rate=1e6, offset=2,
+            freq_offset_hz=10e3)
+        np.testing.assert_allclose(res.points, self.SYMS, atol=1e-9)
+
+    def test_derotation_uses_the_recording_time_base(self):
+        # Same carrier offset, same phase: a slice taken later in the
+        # capture must land on the same points when told where it starts.
+        z = self._signal(cfo=10e3)
+        full = analysis.constellation(
+            z, fs=4e6, symbol_rate=1e6, offset=2, freq_offset_hz=10e3)
+        part = analysis.constellation(
+            z[40:], fs=4e6, symbol_rate=1e6, offset=2, freq_offset_hz=10e3,
+            start_sample=40)
+        np.testing.assert_allclose(part.points, full.points[10:], atol=1e-9)
+
+    def test_conjugate_mirrors_q(self):
+        res = analysis.constellation(
+            np.array([1 + 1j, -1 + 2j]), conjugate=True, normalize=False)
+        np.testing.assert_array_equal(res.points, [1 - 1j, -1 - 2j])
+
+    def test_fractional_samples_per_symbol(self):
+        z = np.exp(1j * np.arange(100))
+        res = analysis.constellation(z, fs=2.5, symbol_rate=1.0)
+        np.testing.assert_array_equal(
+            res.points, z[np.rint(np.arange(40) * 2.5).astype(int)])
+
+    def test_without_symbol_rate_returns_every_sample_normalised(self):
+        z = 3 * np.exp(1j * np.arange(10))
+        res = analysis.constellation(z, offset=2)
+        self.assertEqual(res.points.size, 8)
+        self.assertAlmostEqual(res.rms, 3.0)
+        np.testing.assert_allclose(np.abs(res.points), 1.0)
+
+    def test_errors(self):
+        with self.assertRaises(ValueError):
+            analysis.constellation(np.ones(4))  # real input
+        with self.assertRaises(ValueError):
+            analysis.constellation(np.ones(4, complex), symbol_rate=1e6)
+        with self.assertRaises(ValueError):
+            analysis.constellation(np.ones(4, complex), fs=1.0,
+                                   symbol_rate=2.0)
+
+
 if __name__ == "__main__":
     unittest.main()

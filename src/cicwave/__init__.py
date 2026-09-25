@@ -11,6 +11,7 @@ Supports multiple file formats:
 - NumPy .npz archives (tabular / bench traces)
 - VCD digital waveforms
 - LitePoint .iqvsa IQ capture files
+- SigMF IQ recordings (.sigmf-meta/.sigmf-data, .sigmf archives)
 
 Features:
 - GPU-accelerated rendering with PyQtGraph

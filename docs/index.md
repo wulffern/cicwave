@@ -53,7 +53,7 @@ Usage: cicwave [OPTIONS] [FILES]...
 
   Supports: .raw, .csv, .tsv, .xlsx, .json, .parquet, .feather, .npz, .h5,
   .pkl, .vcd (digital), .iqvsa (LitePoint), .stdf (ATE), .u32 (raw counter
-  captures), and more.
+  captures), .sigmf-meta/.sigmf (SigMF IQ), and more.
 
   URL sources:
     cicwave https://example.com/data.csv    Any http(s) URL works directly
@@ -125,6 +125,7 @@ Options:
 - [Usage](/cicwave/usage) — command-line options, basic usage, environment variables
 - [File formats](/cicwave/formats) — supported file formats and automatic unit detection
 - [URL sources](/cicwave/url-sources) — loading data straight from a REST/CSV URL
+- [Plugins](/cicwave/plugins) — extending cicwave with private formats, annotations and analyses
 - [API sources](/cicwave/api-sources) — a spec that fetches its own data from a JSON REST API
 - [Pivot](/cicwave/pivot) — reshaping long-format data into waveforms
 - [Sessions](/cicwave/sessions) — saving and restoring a viewer state

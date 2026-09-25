@@ -32,8 +32,8 @@ import pyqtgraph as pg
 from .wavefiles import (
     WAVE_X_MARKER, WaveFile, WaveFiles, parse_unit_from_name, _is_url)
 from . import analysis as wave_analysis
+from . import plugins as _plugins
 from .theme import THEMES, _get_theme, _set_active_theme
-from matplotlib.ticker import EngFormatter
 
 
 def _mono_font(size):
@@ -143,6 +143,9 @@ _eng_cache = {}
 def _eng(value, unit=""):
     fmt = _eng_cache.get(unit)
     if fmt is None:
+        #- Imported here, not at module level: matplotlib costs ~0.1-0.2 s
+        #- at startup and is otherwise only needed for PDF export.
+        from matplotlib.ticker import EngFormatter
         fmt = EngFormatter(unit=unit)
         _eng_cache[unit] = fmt
     return fmt(value)
@@ -1297,9 +1300,17 @@ class PgWaveBrowser(QWidget):
                 ("Difference (this − other)...", "diff"),
                 ("SNR / SNDR / ENOB...", "snr"),
                 ("ADC PSD (SNDR, SFDR, harmonics)...", "adc_psd"),
-                ("X vs Y...", "xvy")]:
+                ("X vs Y...", "xvy"),
+                ("Constellation (IQ)...", "constellation")]:
             menu.addAction(label, lambda t=atype: self.analysisRequested.emit(
                 t, wave))
+        #- Analyses contributed by installed plugins (cicwave.plugins).
+        extra = _plugins.analyses()
+        if extra:
+            menu.addSeparator()
+            for i, (label, _fn) in enumerate(extra):
+                menu.addAction(label, lambda t="plugin:%d" % i:
+                               self.analysisRequested.emit(t, wave))
         menu.exec(self.wave_tree.viewport().mapToGlobal(pos))
 
 
@@ -1889,6 +1900,13 @@ class PgWavePlot(QWidget):
     # Public API
     # ------------------------------------------------------------------
 
+    def _enable_gl_when_busy(self):
+        """Move this plot onto OpenGL once it has enough curves to need it."""
+        if (_gl_on_demand and not getattr(self, '_gl_enabled', False)
+                and len(self.wave_data) >= _GL_CURVE_THRESHOLD):
+            self._gl_enabled = True
+            self.gw.useOpenGL(True)
+
     def show_wave(self, wave, style='Lines'):
         """Plot a wave. Returns (tag, color) on success, else None.
 
@@ -1950,6 +1968,7 @@ class PgWavePlot(QWidget):
             return None
 
         self.wave_data[wave.tag] = (wave, yunit)
+        self._enable_gl_when_busy()
 
         if wave._xlabels and not self._has_rotated_x:
             ticks = list(zip(range(len(wave._xlabels)), wave._xlabels))
@@ -3716,7 +3735,7 @@ class PgWaveWindow(QMainWindow):
     def _open_file(self):
         fname, _ = QFileDialog.getOpenFileName(
             self, "Open File", os.getcwd(),
-            "All Supported (*.raw *.vcd *.csv *.tsv *.txt *.xlsx *.xls *.ods *.pkl *.pickle *.json *.parquet *.feather *.npz *.h5 *.hdf5 *.yaml *.yml);;Raw Files (*.raw);;VCD Files (*.vcd);;CSV/TSV (*.csv *.tsv *.txt);;Excel (*.xlsx *.xls *.ods);;Pickle (*.pkl *.pickle);;JSON (*.json);;Parquet (*.parquet);;Feather (*.feather);;NumPy (*.npz);;HDF5 (*.h5 *.hdf5);;Specs and sessions (*.yaml *.yml);;All Files (*)")
+            "All Supported (*.raw *.vcd *.csv *.tsv *.txt *.xlsx *.xls *.ods *.pkl *.pickle *.json *.parquet *.feather *.npz *.sigmf-meta *.sigmf *.h5 *.hdf5 *.yaml *.yml);;Raw Files (*.raw);;VCD Files (*.vcd);;CSV/TSV (*.csv *.tsv *.txt);;Excel (*.xlsx *.xls *.ods);;Pickle (*.pkl *.pickle);;JSON (*.json);;Parquet (*.parquet);;Feather (*.feather);;NumPy (*.npz);;SigMF (*.sigmf-meta *.sigmf-data *.sigmf);;HDF5 (*.h5 *.hdf5);;Specs and sessions (*.yaml *.yml);;All Files (*)")
         if fname:
             try:
                 self.openPath(fname)
@@ -4301,6 +4320,10 @@ class PgWaveWindow(QMainWindow):
             freq_offset_hz = 0.0
             if np.iscomplexobj(y_fft):
                 freq_offset_hz = float(iq_meta.get("center_hz", 0.0) or 0.0)
+                #- A mirrored (spectrum-inverted) low-IF capture: flip it
+                #- back so frequencies read upwards in RF.
+                if iq_meta.get("spectrum_inverted"):
+                    y_fft = np.conj(y_fft)
             self._do_fft(wave.key, x, y_fft, wave.xunit, wave.yunit,
                           dbfs_amplitude=None, freq_offset_hz=freq_offset_hz)
         elif atype == "histogram":
@@ -4317,6 +4340,14 @@ class PgWaveWindow(QMainWindow):
             self._do_adc_psd_dialog(wave, x, y)
         elif atype == "xvy":
             self._do_xvy_dialog(wave)
+        elif atype == "constellation":
+            self._do_constellation_dialog(wave)
+        elif atype.startswith("plugin:"):
+            label, fn = _plugins.analyses()[int(atype.split(":", 1)[1])]
+            try:
+                fn(self, wave)
+            except Exception as e:
+                QMessageBox.warning(self, label, "%s failed: %s" % (label, e))
 
     def _plot_for_metrics(self):
         """Return the main ``PgWavePlot`` to attach readout metrics to."""
@@ -4769,6 +4800,279 @@ class PgWaveWindow(QMainWindow):
             ticks = list(zip(yy[:min_len], ylabels[:min_len]))
             w.pw.getAxis('left').setTicks([ticks])
 
+    #- A scatter of more points than this is slow to draw and no clearer.
+    _CONSTELLATION_MAX_POINTS = 200000
+
+    def _constellation_iq(self, wave):
+        """Complex IQ for *wave*: the column itself, or I paired with Q.
+
+        A real column named like ``I``/``I (V)``/``I_ch1`` is paired with
+        the matching ``Q`` column; otherwise the user picks the Q signal.
+        Returns ``(iq, label)`` or ``(None, None)`` when cancelled.
+        """
+        y, _ = _to_numeric_keep_complex(wave.y)
+        if np.iscomplexobj(y):
+            return y, wave.key
+        f = wave.wfile
+        names = list(f.getWaveNames())
+        qname = None
+        if wave.key[:1] in ("I", "i"):
+            cand = ("Q" if wave.key[0] == "I" else "q") + wave.key[1:]
+            if cand in names:
+                qname = cand
+        if qname is None:
+            dlg = _SignalPickerDialog(self, "Select the Q signal", names,
+                                      file_label=f.name)
+            if dlg.exec() != QDialog.Accepted or not dlg.selected():
+                return None, None
+            qname = dlg.selected()
+        qwave = PgWave(f, qname, self.browser.xaxis)
+        qwave.reload()
+        q, _ = _to_numeric(qwave.y)
+        n = min(len(y), len(q))
+        return y[:n] + 1j * q[:n], "%s + j·%s" % (wave.key, qname)
+
+    @staticmethod
+    def _constellation_default_fs(wave):
+        """Sample rate from capture metadata, else from a uniform x axis."""
+        attrs = getattr(wave.wfile.df, "attrs", {}) or {}
+        for key, field in (("cicwave_iq", "samp_rate_hz"),
+                           ("cicwave_iqvsa", "sampling_rate_hz")):
+            fs = (attrs.get(key) or {}).get(field)
+            if fs:
+                return float(fs)
+        x, _ = _to_numeric(wave.x) if wave.x is not None else (None, None)
+        if x is not None and np.ndim(x) == 1 and len(x) > 2:
+            step = float(np.median(np.diff(x)))
+            if step > 0 and wave_analysis.time_base_irregularity(x) < 1e-3:
+                return 1.0 / step
+        return None
+
+    @staticmethod
+    def _constellation_bursts(attrs, n):
+        """``[(label, (start, stop))]`` for the SigMF annotations of a file.
+
+        Recordings of packet radios annotate each burst; picking one keeps
+        the idle gaps (noise) out of the constellation. Any labelled range
+        works the same way, so a recording that also annotates the sections
+        of each packet (e.g. ``"header"``, ``"payload"``) can show each
+        section's constellation on its own. Each label is numbered in its
+        own sequence: ``burst 1``, ``burst 2``, ``payload 1``, ...
+        """
+        anns = attrs.get("cicwave_annotations")
+        if anns is None:
+            anns = (attrs.get("cicwave_sigmf") or {}).get("annotations") or []
+        out = []
+        counts = {}
+        for a in sorted(anns, key=lambda a: (
+                int(a.get("core:sample_start") or 0)
+                if isinstance(a, dict) else 0)):
+            try:
+                start = int(a.get("core:sample_start") or 0)
+                count = int(a.get("core:sample_count") or (n - start))
+            except (TypeError, ValueError, AttributeError):
+                continue
+            if count <= 0 or start >= n:
+                continue
+            text = a.get("core:label") or "annotation"
+            k = counts[text] = counts.get(text, 0) + 1
+            detail = "samples %d-%d" % (start, min(start + count, n) - 1)
+            if a.get("litepoint:mean_dbm") is not None:
+                detail += ", %.2f dBm" % float(a["litepoint:mean_dbm"])
+            out.append(("%s %d (%s)" % (text, k, detail),
+                        (start, min(start + count, n))))
+        return out
+
+    def _do_constellation_dialog(self, wave):
+        wave.reload()
+        iq, label = self._constellation_iq(wave)
+        if iq is None:
+            return
+        grp = "constellation_dialog"
+        fs_default = self._constellation_default_fs(wave)
+        attrs = getattr(wave.wfile.df, "attrs", {}) or {}
+        iq_meta = attrs.get("cicwave_iq") or {}
+        bursts = self._constellation_bursts(attrs, len(iq))
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Constellation — %s" % label)
+        form = QFormLayout(dlg)
+        e_fs = QLineEdit("%.10g" % fs_default if fs_default
+                         else _settings_str(grp, "fs"))
+        e_fs.setPlaceholderText("Hz; needed for symbol rate / freq offset")
+        sr_meta = iq_meta.get("symbol_rate_hz")
+        e_sr = QLineEdit("%.10g" % sr_meta if sr_meta
+                         else _settings_str(grp, "symbol_rate"))
+        e_sr.setPlaceholderText("Hz, e.g. 1e6; empty = plot every sample")
+        e_off = QLineEdit(_settings_str(grp, "offset", "0"))
+        e_off.setPlaceholderText("samples to the first symbol centre")
+        #- A low-IF capture says where its channel sits in the samples;
+        #- that, not the last value typed, is the offset to remove.
+        ch_off = iq_meta.get("channel_offset_hz")
+        e_fo = QLineEdit("%.10g" % ch_off if ch_off
+                         else _settings_str(grp, "freq_offset", "0"))
+        e_fo.setPlaceholderText("Hz carrier offset to remove")
+        e_ph = QLineEdit(_settings_str(grp, "phase", "0"))
+        e_ph.setPlaceholderText("degrees")
+        cb_norm = QCheckBox("Normalise to unit RMS")
+        cb_norm.setChecked(_settings_bool(grp, "normalize", True))
+        cb_traj = QCheckBox("Show trajectory between symbols")
+        cb_traj.setChecked(_settings_bool(grp, "trajectory", False))
+        cb_conj = QCheckBox("Spectrum inverted (mirror Q)")
+        cb_conj.setChecked(bool(iq_meta.get("spectrum_inverted")))
+        cmb_burst = None
+        if bursts:
+            cmb_burst = QComboBox()
+            cmb_burst.addItem("Whole recording", None)
+            for label_b, span in bursts:
+                cmb_burst.addItem(label_b, span)
+            #- The first complete burst: the gaps between packets are just
+            #- noise, and a burst cut by the record edge may be ramping.
+            first_full = next((i for i, (lb, _s) in enumerate(bursts)
+                               if "partial" not in lb), 0)
+            cmb_burst.setCurrentIndex(first_full + 1)
+            form.addRow("Samples", cmb_burst)
+        #- A packet is several differently modulated sections (training,
+        #- header, payload); a window picks one so they don't smear together.
+        e_t0 = QLineEdit(_settings_str(grp, "window_start"))
+        e_t0.setPlaceholderText("µs from the start; empty = start")
+        e_t1 = QLineEdit(_settings_str(grp, "window_stop"))
+        e_t1.setPlaceholderText("µs from the start; empty = end")
+        form.addRow("Window start (µs)", e_t0)
+        form.addRow("Window stop (µs)", e_t1)
+        presets = _plugins.constellation_presets()
+        if presets:
+            #- Named settings from plugins: fill the fields in one go.
+            cmb_preset = QComboBox()
+            cmb_preset.addItem("(none)")
+            cmb_preset.addItems(sorted(presets))
+
+            def _apply_preset(name):
+                cfg = presets.get(name)
+                if not cfg:
+                    return
+                edits = {"symbol_rate": e_sr, "offset": e_off,
+                         "freq_offset": e_fo, "phase": e_ph,
+                         "window_start": e_t0, "window_stop": e_t1}
+                for key, edit in edits.items():
+                    if key in cfg:
+                        v = cfg[key]
+                        edit.setText("" if v is None else "%.10g" % v
+                                     if isinstance(v, (int, float)) else str(v))
+                for key, cb in (("conjugate", cb_conj), ("normalize", cb_norm),
+                                ("trajectory", cb_traj)):
+                    if key in cfg:
+                        cb.setChecked(bool(cfg[key]))
+                want = cfg.get("annotation")
+                if want and cmb_burst is not None:
+                    for i in range(cmb_burst.count()):
+                        if cmb_burst.itemText(i).startswith(want + " "):
+                            cmb_burst.setCurrentIndex(i)
+                            break
+            cmb_preset.currentTextChanged.connect(_apply_preset)
+            form.insertRow(0, "Preset", cmb_preset)
+        form.addRow("Sample rate F_s (Hz)", e_fs)
+        form.addRow("Symbol rate (Hz)", e_sr)
+        form.addRow("Timing offset (samples)", e_off)
+        form.addRow("Frequency offset (Hz)", e_fo)
+        form.addRow("Phase rotation (°)", e_ph)
+        form.addRow(cb_conj)
+        form.addRow(cb_norm)
+        form.addRow(cb_traj)
+        bb = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        form.addRow(bb)
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        span = cmb_burst.currentData() if cmb_burst is not None else None
+        #- Where the selection starts in the recording, so the carrier
+        #- derotation (and hence the phase setting) doesn't depend on it.
+        start_sample = 0
+        if span is not None:
+            iq = iq[span[0]:span[1]]
+            start_sample = span[0]
+            label = "%s, %s" % (label, cmb_burst.currentText().split(" (")[0])
+
+        def _num(edit, default=None):
+            t = edit.text().strip()
+            return float(t) if t else default
+        try:
+            fs = _num(e_fs)
+            sr = _num(e_sr)
+            off = _num(e_off, 0.0)
+            fo = _num(e_fo, 0.0)
+            ph = _num(e_ph, 0.0)
+            t0 = _num(e_t0)
+            t1 = _num(e_t1)
+        except ValueError:
+            QMessageBox.warning(self, "Constellation", "Invalid numeric input.")
+            return
+        if t0 is not None or t1 is not None:
+            if not fs:
+                QMessageBox.warning(self, "Constellation",
+                                    "A time window needs the sample rate.")
+                return
+            a = int(round((t0 or 0.0) * 1e-6 * fs))
+            b = len(iq) if t1 is None else int(round(t1 * 1e-6 * fs))
+            if not 0 <= a < b:
+                QMessageBox.warning(self, "Constellation",
+                                    "The window start must be before its stop.")
+                return
+            iq = iq[a:b]
+            start_sample += a
+            label = "%s, %s-%s µs" % (label, "%g" % (t0 or 0.0),
+                                      "end" if t1 is None else "%g" % t1)
+        _settings_save(grp, {
+            "fs": e_fs.text().strip(),
+            "symbol_rate": e_sr.text().strip(),
+            "offset": e_off.text().strip(),
+            "freq_offset": e_fo.text().strip(),
+            "phase": e_ph.text().strip(),
+            "window_start": e_t0.text().strip(),
+            "window_stop": e_t1.text().strip(),
+            "normalize": "1" if cb_norm.isChecked() else "0",
+            "trajectory": "1" if cb_traj.isChecked() else "0",
+        })
+        try:
+            res = wave_analysis.constellation(
+                iq, fs=fs, symbol_rate=sr, offset=off, freq_offset_hz=fo,
+                phase_deg=ph, conjugate=cb_conj.isChecked(),
+                start_sample=start_sample, normalize=cb_norm.isChecked())
+        except ValueError as e:
+            QMessageBox.warning(self, "Constellation", str(e))
+            return
+        pts = res.points[:self._CONSTELLATION_MAX_POINTS]
+
+        title = "Constellation: %s" % label
+        if sr:
+            title += " (%.4g sps)" % res.samples_per_symbol
+        if len(res.points) > len(pts):
+            title += " (first %d)" % len(pts)
+        w = self._add_analysis_tab(title)
+        if cb_traj.isChecked() and sr:
+            #- The derotated samples between the symbol points, faint, so
+            #- the eye opening / ISI is visible behind the decisions.
+            traj = wave_analysis.constellation(
+                iq, fs=fs, freq_offset_hz=fo, phase_deg=ph,
+                conjugate=cb_conj.isChecked(), start_sample=start_sample,
+                normalize=False)
+            z = traj.points[:self._CONSTELLATION_MAX_POINTS * 4]
+            if cb_norm.isChecked() and res.rms > 0:
+                z = z / res.rms
+            w.plot(z.real, z.imag, pen=pg.mkPen((128, 128, 128, 90), width=1))
+        if sr:
+            w.plot(pts.real, pts.imag, pen=None, symbol='o', symbolSize=4,
+                   symbolPen=None, symbolBrush=pg.mkBrush(0, 200, 255, 160))
+        else:
+            #- Every sample: draw as points, not a line, so dense captures
+            #- still show where the energy sits.
+            w.plot(pts.real, pts.imag, pen=None, symbol='o', symbolSize=2,
+                   symbolPen=None, symbolBrush=pg.mkBrush(0, 200, 255, 90))
+        w.setLabel('bottom', 'I')
+        w.setLabel('left', 'Q')
+        w.pw.setAspectLocked(True)
+
     def autoplot_pivot_for_export(self):
         """Backwards-compatible alias for :meth:`autoplot_for_export`."""
         return self.autoplot_for_export()
@@ -4867,16 +5171,29 @@ def _detect_opengl():
 
 _detect_opengl._mac_warned = False
 
+#- Creating the OpenGL context costs 0.3-0.5 s on the first ``show()``,
+#- which was most of what separated launching the viewer from seeing it,
+#- and a handful of curves draws just as well without it. So unless
+#- ``CICSIM_USE_OPENGL=1`` asks for it from the start, plots begin on the
+#- raster renderer and a plot switches to OpenGL once it carries this many
+#- curves - the case (one curve per file across many files) GL is for.
+_GL_CURVE_THRESHOLD = 20
+_gl_on_demand = False
+
 
 class CmdWavePg:
     def __init__(self, xaxis, theme='dark'):
         self.app = QApplication.instance() or QApplication(sys.argv)
-        # Enable OpenGL when available: gives a large speedup when many
-        # curves are on screen (e.g. one curve per file across hundreds of
-        # files). Falls back silently to raster when PyOpenGL is missing
-        # or on platforms where it renders blank plots (macOS).
+        # OpenGL gives a large speedup when many curves are on screen (e.g.
+        # one curve per file across hundreds of files), but setting it up
+        # slows startup, so it is switched on per plot once that plot gets
+        # busy (see _GL_CURVE_THRESHOLD). Stays on raster when PyOpenGL is
+        # missing or CICSIM_USE_OPENGL=0.
+        global _gl_on_demand
         use_gl = _detect_opengl()
-        pg.setConfigOptions(antialias=False, useOpenGL=use_gl)
+        forced = os.environ.get("CICSIM_USE_OPENGL") == "1"
+        _gl_on_demand = use_gl and not forced
+        pg.setConfigOptions(antialias=False, useOpenGL=use_gl and forced)
         _apply_theme(self.app, theme)
         effective = xaxis
         if not effective:
