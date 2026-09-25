@@ -3070,6 +3070,7 @@ class PgAnalysisPlot(QWidget):
         self.readout = QTextEdit()
         self.readout.setReadOnly(True)
         self.readout.setMaximumHeight(80)
+        self._notes = ""
         self.readout.setFont(font)
         layout.addWidget(self.readout)
 
@@ -3332,6 +3333,17 @@ class PgAnalysisPlot(QWidget):
         data_x = self._view_to_data_x(mp.x())
         self.status.setText("x: %s" % _eng(data_x, self._xunit))
 
+    def set_notes(self, text):
+        """Fixed text at the top of the readout, kept when cursors move.
+
+        For results that belong with the plot (e.g. a plugin's EVM figures).
+        """
+        self._notes = text or ""
+        n = self._notes.count("\n") + 1 if self._notes else 0
+        #- Room for the notes plus the cursor lines.
+        self.readout.setMaximumHeight(80 + 16 * n)
+        self._update_readout()
+
     def _update_readout(self):
         xa_raw = self.cursor_a
         xb_raw = self.cursor_b
@@ -3346,8 +3358,14 @@ class PgAnalysisPlot(QWidget):
             dx = xb - xa
             parts.append("ΔX: %s" % _eng(dx, self._xunit))
 
-        lines = ["  ".join(parts)]
+        lines = ([self._notes] if self._notes else []) + ["  ".join(parts)]
         for xd, yd in self._curves:
+            #- Readings need a cursor, and only mean something along an
+            #- ordered x (not for a scatter such as a constellation).
+            if xa is None and xb is None:
+                break
+            if len(xd) < 2 or np.any(np.diff(xd) < 0):
+                continue
             grad = np.gradient(yd, xd)
             wparts = []
             if xa is not None:
@@ -4363,6 +4381,15 @@ class PgWaveWindow(QMainWindow):
             if isinstance(ww, PgWavePlot):
                 return ww
         return None
+
+    def add_analysis_tab(self, title):
+        """Open a new analysis tab and return its plot (public, for plugins).
+
+        The returned plot has ``plot(x, y, **pyqtgraph_kwargs)``,
+        ``setLabel(axis, text, units)``, ``set_notes(text)`` and ``pw``, the
+        underlying ``pyqtgraph.PlotWidget``.
+        """
+        return self._add_analysis_tab(title)
 
     def _add_analysis_tab(self, title):
         w = PgAnalysisPlot()
