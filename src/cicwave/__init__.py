@@ -22,6 +22,10 @@ Features:
 - Engineering unit formatting
 """
 
-__version__ = "1.0.0"
+try:
+    from importlib.metadata import PackageNotFoundError, version as _version
+    __version__ = _version("cicwave")
+except PackageNotFoundError:  # running from a source tree that is not installed
+    __version__ = "0.0.0"
 __author__ = "Carsten Wulff"
 __email__ = "carsten@wulff.no"
