@@ -21,9 +21,9 @@ cicwave uses automated releases via GitHub Actions. The workflow is triggered wh
    ```bash
    git add pyproject.toml
    git commit -m "Bump version to 0.6.0"
-   git tag v0.6.0
+   git tag 0.6.0    # no "v": the workflow only triggers on bare X.Y.Z tags
    git push origin main
-   git push origin v0.6.0
+   git push origin 0.6.0
    ```
 
 3. **Monitor the release**: The GitHub Action will automatically:
