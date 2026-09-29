@@ -5,6 +5,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 import numpy as np
 import pandas as pd
@@ -101,10 +102,73 @@ class PluginApiTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             api.register_constellation_preset("bad", {"symbolrate": 1})
 
+    def test_plugin_info_lists_registrations_and_failures(self):
+        def register(api):
+            api.set_description("Decodes things")
+            api.register_reader(".mybin", lambda p: None)
+            api.register_analysis("Peak / average", lambda w, wave: None)
+            api.register_constellation_preset("QPSK", {"symbol_rate": 1e6})
+
+        def broken(api):
+            raise RuntimeError("boom")
+        with self.assertLogs("cicwave.plugins", level="WARNING"):
+            self._load(register, broken)
+        info = {i["name"]: i for i in plugins.plugin_info()}
+        self.assertEqual(info["p0"]["description"], "Decodes things")
+        self.assertEqual(info["p0"]["readers"], [".mybin"])
+        self.assertEqual(info["p0"]["analyses"], ["Peak / average"])
+        self.assertEqual(info["p0"]["presets"], ["QPSK"])
+        self.assertIsNone(info["p0"]["error"])
+        self.assertEqual(info["p1"]["error"], "boom")
+        text = plugins.describe_plugins()
+        self.assertIn("Decodes things", text)
+        self.assertIn("FAILED TO LOAD: boom", text)
+
+    def test_describe_with_no_plugins(self):
+        self._load()
+        with mock.patch.dict(os.environ, {"CICWAVE_PLUGINS": ""}):
+            self.assertIn("No plugins installed", plugins.describe_plugins())
+        with mock.patch.dict(os.environ, {"CICWAVE_PLUGINS": "0"}):
+            self.assertIn("discovery is off", plugins.describe_plugins())
+
     def test_no_plugins_installed_is_a_no_op(self):
         self.assertEqual(self._load(), [])
         self.assertIsNone(plugins.find_reader("x.csv"))
         self.assertEqual(plugins.analyses(), [])
+
+
+_EXAMPLE = os.path.join(os.path.dirname(__file__), "..", "..", "examples",
+                        "cicwave-uart")
+
+
+class UartExampleTest(unittest.TestCase):
+    """The example plugin in examples/cicwave-uart keeps working."""
+
+    def setUp(self):
+        import sys
+        sys.path.insert(0, _EXAMPLE)
+        self.addCleanup(sys.path.remove, _EXAMPLE)
+        from cicwave_uart import uart
+        self.uart = uart
+
+    def test_decodes_a_noisy_capture_at_the_estimated_baud(self):
+        msg = b"Hello, cicwave!\x00\xff"
+        t, v = self.uart.encode(msg, baud=115200, fs=10e6)
+        v = 3.3 * v + np.random.default_rng(1).normal(0, 0.1, v.size)
+        baud = self.uart.estimate_baud(t, v)
+        self.assertAlmostEqual(baud / 115200, 1.0, delta=0.02)
+        frames = self.uart.decode(t, v, baud)
+        self.assertEqual(bytes(f.value for f in frames), msg)
+        self.assertTrue(all(f.ok for f in frames))
+
+    def test_registers_its_analysis(self):
+        plugins._reset()
+        self.addCleanup(plugins._reset)
+        import cicwave_uart
+        plugins.load_plugins([_EntryPoint("uart", cicwave_uart.register)])
+        (info,) = plugins.plugin_info()
+        self.assertEqual(info["analyses"], ["Decode UART..."])
+        self.assertIn("UART", info["description"])
 
 
 if __name__ == "__main__":

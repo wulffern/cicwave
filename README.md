@@ -60,6 +60,10 @@ repo. As such, you're here.
 - **GPU-accelerated plotting** for smooth interaction with large datasets
 - **MCP server** (`cicwave-mcp`, optional): plot/analyze tools for an
   agent driving tests to call directly — see [docs](https://wulffern.github.io/cicwave/mcp)
+- **Plugins**: private file formats, annotations, analyses and constellation
+  presets from separately installed packages, listed under Help → Plugins —
+  see [docs](https://wulffern.github.io/cicwave/plugins) and the UART decoder
+  in [`examples/cicwave-uart`](examples/cicwave-uart)
 
 ## Installation
 
@@ -200,6 +204,7 @@ through to the ngspice raw reader, so non-standard suffixes (e.g. `.raw0`,
 ## Environment Variables
 
 - `CICWAVE_X` - Default X-axis column name
+- `CICWAVE_PLUGINS=0` - Start without loading any [plugins](https://wulffern.github.io/cicwave/plugins)
 
 ## GUI Features
 

@@ -24,6 +24,9 @@ API to register:
 * **constellation presets** -- ``register_constellation_preset(name,
   settings)``; offered in the constellation dialog, filling its fields.
 
+``set_description(text)`` gives the plugin a one-line description for
+Help > Plugins; without it the package's own summary is shown.
+
 A plugin that fails to load or raises is logged and skipped, never taking
 cicwave down with it. ``CICWAVE_PLUGINS=0`` in the environment disables
 plugin discovery altogether (cicwave's own test suite runs that way).
@@ -42,6 +45,8 @@ __all__ = [
     "analyses",
     "constellation_presets",
     "CONSTELLATION_FIELDS",
+    "plugin_info",
+    "describe_plugins",
 ]
 
 #: Bumped when the API changes incompatibly; a plugin can compare it.
@@ -61,6 +66,7 @@ _readers = {}
 _annotators = []
 _analyses = []
 _presets = {}
+_info = {}
 _loaded = False
 
 
@@ -71,18 +77,26 @@ class PluginAPI:
 
     def __init__(self, name):
         self.name = name
+        self._info = _info.setdefault(name, _new_info(name))
+
+    def set_description(self, text):
+        """One line saying what the plugin is for, shown in Help > Plugins."""
+        self._info["description"] = str(text).strip()
 
     def register_reader(self, suffix, fn):
         suffix = suffix.lower()
         if not suffix.startswith("."):
             suffix = "." + suffix
         _readers[suffix] = (fn, self.name)
+        self._info["readers"].append(suffix)
 
     def register_annotator(self, fn):
         _annotators.append((fn, self.name))
+        self._info["annotators"].append(getattr(fn, "__name__", repr(fn)))
 
     def register_analysis(self, label, fn):
         _analyses.append((label, fn, self.name))
+        self._info["analyses"].append(label)
 
     def register_constellation_preset(self, name, settings):
         unknown = set(settings) - set(CONSTELLATION_FIELDS)
@@ -90,6 +104,23 @@ class PluginAPI:
             raise ValueError("unknown constellation preset field(s): %s"
                              % ", ".join(sorted(unknown)))
         _presets[name] = dict(settings)
+        self._info["presets"].append(name)
+
+
+def _new_info(name):
+    return {"name": name, "description": "", "version": "", "error": None,
+            "readers": [], "annotators": [], "analyses": [], "presets": []}
+
+
+def _dist_metadata(ep):
+    """``(summary, version)`` of the package providing *ep*, if known."""
+    dist = getattr(ep, "dist", None)
+    if dist is None:
+        return "", ""
+    try:
+        return (dist.metadata.get("Summary") or "", dist.version or "")
+    except Exception:  # pragma: no cover - odd metadata
+        return "", ""
 
 
 def load_plugins(entry_points=None):
@@ -115,13 +146,53 @@ def load_plugins(entry_points=None):
             return []
     names = []
     for ep in entry_points:
+        info = _info.setdefault(ep.name, _new_info(ep.name))
+        info["description"], info["version"] = _dist_metadata(ep)
         try:
             register = ep.load()
             register(PluginAPI(ep.name))
             names.append(ep.name)
         except Exception as e:
+            info["error"] = str(e) or type(e).__name__
             _log.warning("cicwave plugin %r failed to load: %s", ep.name, e)
     return names
+
+
+def plugin_info():
+    """What each discovered plugin is and registered, for display.
+
+    A list of dicts with ``name``, ``description``, ``version``, ``error``
+    (the load failure, or None) and the lists ``readers``, ``annotators``,
+    ``analyses`` and ``presets``.
+    """
+    load_plugins()
+    return [dict(i) for i in _info.values()]
+
+
+def describe_plugins():
+    """Plain-text summary of :func:`plugin_info`, as Help > Plugins shows."""
+    infos = plugin_info()
+    if not infos and os.environ.get("CICWAVE_PLUGINS") == "0":
+        return "Plugin discovery is off (CICWAVE_PLUGINS=0)."
+    if not infos:
+        return ("No plugins installed.\n\nA plugin is a package declaring a "
+                "'%s' entry point." % ENTRY_POINT_GROUP)
+    out = []
+    for i in infos:
+        head = i["name"] + (" " + i["version"] if i["version"] else "")
+        out.append(head)
+        if i["description"]:
+            out.append("  " + i["description"])
+        if i["error"]:
+            out.append("  FAILED TO LOAD: " + i["error"])
+        for key, title in (("readers", "Readers"),
+                           ("annotators", "Annotators"),
+                           ("analyses", "Analyses"),
+                           ("presets", "Constellation presets")):
+            if i[key]:
+                out.append("  %-22s %s" % (title + ":", ", ".join(i[key])))
+        out.append("")
+    return "\n".join(out).rstrip()
 
 
 def find_reader(path):
@@ -178,4 +249,5 @@ def _reset():
     _annotators.clear()
     _analyses.clear()
     _presets.clear()
+    _info.clear()
     _loaded = False
