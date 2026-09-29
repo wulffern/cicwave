@@ -62,8 +62,9 @@ repo. As such, you're here.
   agent driving tests to call directly — see [docs](https://wulffern.github.io/cicwave/mcp)
 - **Plugins**: private file formats, annotations, analyses and constellation
   presets from separately installed packages, listed under Help → Plugins —
-  see [docs](https://wulffern.github.io/cicwave/plugins) and the UART decoder
-  in [`examples/cicwave-uart`](examples/cicwave-uart)
+  see [docs](https://wulffern.github.io/cicwave/plugins) and the examples:
+  a UART decoder ([`examples/cicwave-uart`](examples/cicwave-uart)) and a
+  Touchstone reader with Smith chart ([`examples/cicwave-smith`](examples/cicwave-smith))
 
 ## Installation
 

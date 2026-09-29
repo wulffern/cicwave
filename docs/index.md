@@ -127,6 +127,7 @@ Options:
 - [URL sources](/cicwave/url-sources) — loading data straight from a REST/CSV URL
 - [Plugins](/cicwave/plugins) — extending cicwave with private formats, annotations and analyses
 - [UART decoder plugin](/cicwave/uart-plugin) — an example plugin that decodes UART bytes from a waveform
+- [Smith chart plugin](/cicwave/smith-plugin) — an example plugin that reads Touchstone files and draws Smith charts
 - [API sources](/cicwave/api-sources) — a spec that fetches its own data from a JSON REST API
 - [Pivot](/cicwave/pivot) — reshaping long-format data into waveforms
 - [Sessions](/cicwave/sessions) — saving and restoring a viewer state
