@@ -171,5 +171,82 @@ class UartExampleTest(unittest.TestCase):
         self.assertIn("UART", info["description"])
 
 
+_SMITH = os.path.join(os.path.dirname(__file__), "..", "..", "examples",
+                      "cicwave-smith")
+
+
+class SmithExampleTest(unittest.TestCase):
+    """The example plugin in examples/cicwave-smith keeps working."""
+
+    def setUp(self):
+        import sys
+        sys.path.insert(0, _SMITH)
+        self.addCleanup(sys.path.remove, _SMITH)
+        from cicwave_smith import smith, touchstone
+        self.smith, self.ts = smith, touchstone
+        self.tmp = tempfile.mkdtemp(prefix="cicwave-smith-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def _write(self, name, text):
+        path = os.path.join(self.tmp, name)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        return path
+
+    def test_reads_every_format_to_the_same_values(self):
+        g = 0.5 * np.exp(1j * np.deg2rad(-60))
+        files = {
+            "ma.s1p": "# GHZ S MA R 50\n1.0 0.5 -60\n",
+            "db.s1p": "# GHZ S DB R 50\n1.0 %.12f -60\n"
+                      % (20 * np.log10(0.5)),
+            "ri.s1p": "! comment\n# MHz S RI R 75\n1000 %.12f %.12f\n"
+                      % (g.real, g.imag),
+        }
+        for name, text in files.items():
+            df = self.ts.read(self._write(name, text))
+            self.assertAlmostEqual(df["frequency"][0], 1e9)
+            self.assertAlmostEqual(df["S11"][0], g, places=9, msg=name)
+        self.assertEqual(df.attrs["touchstone"]["z0"], 75.0)
+
+    def test_two_port_order_and_noise_block(self):
+        path = self._write("amp.s2p", (
+            "# HZ S RI R 50\n"
+            "1e9 1 0  2 0  3 0  4 0\n"
+            "2e9 5 0  6 0\n 7 0  8 0\n"      # a record wrapped over lines
+            "! noise parameters\n"
+            "1e9 1.5 0.3 20 0.4\n"
+            "1.5e9 1.6 0.3 25 0.4\n"
+            "2e9 1.7 0.3 30 0.4\n"))
+        df = self.ts.read(path)
+        self.assertEqual(len(df), 2)
+        self.assertEqual(list(np.real(df["S21"])), [2, 6])  # 2nd is S21
+        self.assertEqual(list(np.real(df["S12"])), [3, 7])
+
+    def test_reader_feeds_wavefile_through_the_plugin(self):
+        import cicwave_smith
+        plugins._reset()
+        self.addCleanup(plugins._reset)
+        plugins.load_plugins([_EntryPoint("smith", cicwave_smith.register)])
+        path = self._write("a.s1p", "# GHZ S MA R 50\n1 0.1 0\n2 0.2 90\n")
+        df = WaveFile(path, xaxis="").df
+        self.assertEqual(list(df.columns),
+                         ["frequency", "S11", "S11_dB", "S11_deg"])
+        (info,) = plugins.plugin_info()
+        self.assertIn(".s2p", info["readers"])
+        self.assertEqual(info["analyses"], ["Smith chart"])
+
+    def test_chart_geometry_and_match_figures(self):
+        for _label, pts in self.smith.grid_lines():
+            self.assertTrue(np.all(np.abs(pts) <= 1 + 1e-9))
+        z = np.array([50, 25 + 10j, 100 - 40j])
+        np.testing.assert_allclose(
+            self.smith.z_from_gamma(self.smith.gamma_from_z(z)), z)
+        g = self.smith.gamma_from_z(np.array([100, 75, 30]))
+        best = self.smith.match_summary(np.array([1e9, 2e9, 3e9]), g)
+        self.assertEqual(best["frequency"], 2e9)          # 75 ohm: |g| = 0.2
+        self.assertAlmostEqual(best["vswr"], 1.5)
+        self.assertAlmostEqual(best["return_loss_db"], 13.979, places=3)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -53,6 +53,68 @@ cicwave uart_demo.csv
    The first frame is `H` (0x48): a start bit, the data bits
    `0 0 0 1 0 0 1 0` sent LSB first, and a stop bit.
 
+## How UART works
+
+UART (Universal Asynchronous Receiver/Transmitter) sends bytes one bit at
+a time over a single wire per direction: TX on one side goes to RX on the
+other. There is **no clock line**. Both sides agree on the speed in
+advance, and the receiver re-synchronises on every byte.
+
+**The line idles high.** With nothing to send, the line sits at logic 1
+(3.3 V in the demo).
+
+**The baud rate is the bit rate.** At 115200 baud one bit lasts
+1/115200 ≈ 8.68 µs. The two ends must agree to within about ±2–3 %.
+
+### One frame
+
+The common format is **8N1**: 8 data bits, no parity, 1 stop bit. This
+is `H` = 0x48 = `0100 1000`, the first frame in the zoomed screenshot
+above:
+
+```
+idle  start  b0  b1  b2  b3  b4  b5  b6  b7  stop  idle
+ 1     0     0   0   0   1   0   0   1   0    1     1
+‾‾‾‾\_______________/‾‾‾\_______/‾‾‾\___/‾‾‾‾‾‾‾‾‾‾‾‾
+       |<-------------- 10 bits = 86.8 µs ------------->|
+```
+
+- **Start bit (0).** The falling edge from idle marks the start of a byte.
+  It is the receiver's only timing reference.
+- **Data bits, LSB first.** `01001000` goes out reversed, as
+  `0 0 0 1 0 0 1 0`.
+- **Parity bit (optional).** An extra bit that makes the number of 1s even
+  or odd, to catch single-bit errors.
+- **Stop bit (1).** Returns the line to idle, so the next start bit is
+  always a fresh falling edge.
+
+Ten bits carry eight bits of data, so 115200 baud moves 11520 bytes/s.
+
+### Reading a frame
+
+A receiver:
+
+1. waits for a falling edge on the idle line;
+2. checks half a bit later that the line is still low. If it isn't, the
+   edge was a glitch, not a start bit;
+3. samples each following bit in its **middle**, the point furthest from
+   both edges, which tolerates the most clock mismatch and noise;
+4. checks the stop bit is 1. If it isn't, that is a **framing error**,
+   usually from the wrong baud rate or noise. The plugin draws those bytes
+   in red.
+
+Because it re-synchronises on every start edge, a timing error only builds
+up across one frame of about 10 bits, not across the whole message. That
+is why UART needs no clock line. A 5 % mismatch, though, would drift by
+half a bit by the last bits, and the samples would land in the wrong bit.
+
+### Variants
+
+- **7E1**: 7 data bits, even parity, 1 stop bit.
+- **8N2**: two stop bits.
+- **RS-232**: the same framing with inverted ±12 V levels, which is
+  `invert=True` in the decoder.
+
 ## How it decodes
 
 The decoder is in `cicwave_uart/uart.py`. It uses only numpy, so it can be
@@ -71,7 +133,8 @@ $$
 
 On the demo capture this gives 115291 baud, 0.08 % from the true 115200.
 
-**Frames.** From each falling edge on an idle line, the decoder
+**Frames.** The decoder follows the receiver steps
+[above](#reading-a-frame). From each falling edge on an idle line, it
 checks that the start bit is still low half a bit later (otherwise it was
 a glitch), then samples every following bit in its middle:
 

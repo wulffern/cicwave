@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cicwave-smith"
+version = "0.1.0"
+description = "Example cicwave plugin: Touchstone reader and Smith chart"
+requires-python = ">=3.9"
+dependencies = ["cicwave", "numpy", "pandas"]
+
+[project.entry-points."cicwave.plugins"]
+smith = "cicwave_smith:register"
+
+[tool.setuptools]
+packages = ["cicwave_smith"]

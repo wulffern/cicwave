@@ -134,6 +134,10 @@ def register(api):
     api.register_analysis("Decode UART...", decode_uart)
 ```
 
+For a plugin that also adds a **reader**, see the
+[Smith chart plugin](/cicwave/smith-plugin): it opens Touchstone `.sNp`
+files and draws a Smith chart of any reflection coefficient.
+
 A decoder for another protocol (SPI, I²C, Manchester, a private bus) has
 the same shape: a pure function from samples to frames, and an analysis
 that draws them.
