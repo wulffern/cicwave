@@ -21,6 +21,7 @@ text under the plot. **Help → Plugins** lists the plugin and its analysis.
 | `cicwave_uart/__init__.py` | `register(api)` and the analysis (the cicwave/Qt part) |
 | `cicwave_uart/uart.py` | the decoder itself, plain numpy, easy to test |
 | `make_demo.py` | writes a noisy 115200-baud capture to try it on |
+| `screenshots.py` | regenerates the screenshots on the [docs page](https://wulffern.github.io/cicwave/uart-plugin) |
 
 Keeping the decoder free of Qt, as here, lets you unit-test it without a
 display and reuse it in scripts.

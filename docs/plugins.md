@@ -89,7 +89,8 @@ and shows any plugin that failed to load together with the error.
 ## Example: a UART decoder
 
 [`examples/cicwave-uart`](https://github.com/wulffern/cicwave/tree/main/examples/cicwave-uart)
-is a small, complete plugin to copy from. It adds **Decode UART...** to
+is a small, complete plugin to copy from; [its own page](/cicwave/uart-plugin)
+walks through it with screenshots. It adds **Decode UART...** to
 the wave context menu, which:
 
 1. estimates the baud rate from the shortest pulse and asks you to confirm it;

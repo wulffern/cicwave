@@ -49,6 +49,7 @@ run: cicwave --help
 - [File formats](/cicwave/formats) — supported file formats and automatic unit detection
 - [URL sources](/cicwave/url-sources) — loading data straight from a REST/CSV URL
 - [Plugins](/cicwave/plugins) — extending cicwave with private formats, annotations and analyses
+- [UART decoder plugin](/cicwave/uart-plugin) — an example plugin that decodes UART bytes from a waveform
 - [API sources](/cicwave/api-sources) — a spec that fetches its own data from a JSON REST API
 - [Pivot](/cicwave/pivot) — reshaping long-format data into waveforms
 - [Sessions](/cicwave/sessions) — saving and restoring a viewer state
