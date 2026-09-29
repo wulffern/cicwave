@@ -73,6 +73,7 @@ def peak_to_average(window, wave):
 
 
 def register(api):
+    api.set_description("Reads .mybin captures and labels their packets")
     api.register_reader(".mybin", read_mybin)
     api.register_annotator(label_packets)
     api.register_analysis("Peak / average", peak_to_average)
@@ -81,7 +82,60 @@ def register(api):
 ```
 
 Install it next to cicwave (`pip install -e .` while developing) and it
-shows up the next time cicwave starts.
+shows up the next time cicwave starts. **Help → Plugins** lists every
+installed plugin with its description, version and what it registered,
+and shows any plugin that failed to load together with the error.
+
+## Example: a UART decoder
+
+[`examples/cicwave-uart`](https://github.com/wulffern/cicwave/tree/main/examples/cicwave-uart)
+is a small, complete plugin to copy from. It adds **Decode UART...** to
+the wave context menu, which:
+
+1. estimates the baud rate from the shortest pulse and asks you to confirm it;
+2. samples the middle of each bit after every start bit;
+3. opens a tab with the waveform, each decoded byte written above its
+   frame (red on a framing error), and the decoded text under the plot.
+
+```sh
+cd examples/cicwave-uart
+pip install -e .
+python make_demo.py       # "Hello, cicwave!" at 115200 baud, with noise
+cicwave uart_demo.csv     # right-click tx > Decode UART...
+```
+
+The decoder (`cicwave_uart/uart.py`) is plain numpy with no Qt, so it can be
+unit-tested without a display and used from scripts. Only
+`cicwave_uart/__init__.py` talks to cicwave:
+
+```python
+def decode_uart(window, wave):
+    x = np.asarray(wave.x, dtype=float)
+    y = np.real(np.asarray(wave.y))
+    guess = estimate_baud(x, y) or 9600.0
+    baud, ok = QInputDialog.getDouble(window, "Decode UART", "Baud rate:",
+                                      round(guess), 1.0, 1e9, 0)
+    if not ok:
+        return
+    frames = decode(x, y, baud)
+    tab = window.add_analysis_tab("UART: %s" % wave.key)
+    tab.plot(x, y, pen=pg.mkPen("c", width=1))
+    for f in frames:
+        text = pg.TextItem(_label(f.value), color="y" if f.ok else "r",
+                           anchor=(0.5, 1.0))
+        text.setPos((f.start + f.stop) / 2, float(np.max(y)))
+        tab.pw.addItem(text)
+    tab.set_notes("".join(_label(f.value) for f in frames))
+
+
+def register(api):
+    api.set_description("Decodes UART bytes from a waveform")
+    api.register_analysis("Decode UART...", decode_uart)
+```
+
+A decoder for another protocol (SPI, I²C, Manchester, a private bus) has
+the same shape: a pure function from samples to frames, and an analysis
+that draws them.
 
 ## The API
 
@@ -92,6 +146,7 @@ incompatibly, so a plugin can check it and refuse to load.
 
 | Call | What it does |
 |------|--------------|
+| `api.set_description(text)` | One line saying what the plugin does, shown in Help → Plugins. Without it, the `description` from the plugin's `pyproject.toml` is shown. |
 | `api.register_reader(suffix, fn)` | `fn(path)` returns a `pandas.DataFrame`. The longest matching suffix wins (so `.foo.bin` beats `.bin`), and plugin readers are tried before the built-in ones. |
 | `api.register_annotator(fn)` | `fn(df, path)` runs after every file is read, whichever reader read it, and may change `df` in place. Use `cicwave.plugins.annotations(df)` to get the list of annotations. |
 | `api.register_analysis(label, fn)` | Adds `label` to the wave context menu; `fn(window, wave)` runs when it is chosen. |
@@ -120,7 +175,8 @@ annotated range as a choice of samples, each label numbered on its own
 ## Failures
 
 A plugin that fails to load, or an annotator that raises, is logged as a
-warning under `cicwave.plugins` and skipped; the file still opens. Set
+warning under `cicwave.plugins` and skipped; the file still opens. Help →
+Plugins shows the load error. Set
 `CICWAVE_PLUGINS=0` to start cicwave with plugin discovery turned off,
 which helps when checking whether a problem comes from a plugin.
 

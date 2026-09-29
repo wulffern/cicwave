@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cicwave-uart"
+version = "0.1.0"
+description = "Example cicwave plugin: decode UART bytes from a waveform"
+requires-python = ">=3.9"
+dependencies = ["cicwave", "numpy"]
+
+[project.entry-points."cicwave.plugins"]
+uart = "cicwave_uart:register"
+
+[tool.setuptools]
+packages = ["cicwave_uart"]

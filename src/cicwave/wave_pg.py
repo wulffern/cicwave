@@ -3589,6 +3589,7 @@ class PgWaveWindow(QMainWindow):
 
         m = mb.addMenu("Help")
         m.addAction("Keyboard Shortcuts", self._show_help)
+        m.addAction("Plugins", self._show_plugins)
 
     def _setup_shortcuts(self):
         for seq, func in [
@@ -3924,6 +3925,25 @@ class PgWaveWindow(QMainWindow):
         text.setStyleSheet(
             "background-color: %s; color: %s; padding: 16px;" % (
                 theme['panel_bg'], theme['panel_fg']))
+        layout.addWidget(text)
+        btn = QPushButton("Close")
+        btn.clicked.connect(dlg.accept)
+        layout.addWidget(btn)
+        dlg.exec()
+
+    def _show_plugins(self):
+        """List installed plugins and what each contributes."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Plugins")
+        dlg.resize(560, 360)
+        layout = QVBoxLayout(dlg)
+        text = QTextEdit()
+        text.setReadOnly(True)
+        text.setFont(_mono_font(10))
+        text.setPlainText(_plugins.describe_plugins())
+        theme = _get_theme()
+        text.setStyleSheet("background-color: %s; color: %s;" % (
+            theme['panel_bg'], theme['panel_fg']))
         layout.addWidget(text)
         btn = QPushButton("Close")
         btn.clicked.connect(dlg.accept)
