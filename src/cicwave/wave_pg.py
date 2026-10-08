@@ -3754,7 +3754,7 @@ class PgWaveWindow(QMainWindow):
     def _open_file(self):
         fname, _ = QFileDialog.getOpenFileName(
             self, "Open File", os.getcwd(),
-            "All Supported (*.raw *.vcd *.csv *.tsv *.txt *.xlsx *.xls *.ods *.pkl *.pickle *.json *.parquet *.feather *.npz *.sigmf-meta *.sigmf *.h5 *.hdf5 *.yaml *.yml);;Raw Files (*.raw);;VCD Files (*.vcd);;CSV/TSV (*.csv *.tsv *.txt);;Excel (*.xlsx *.xls *.ods);;Pickle (*.pkl *.pickle);;JSON (*.json);;Parquet (*.parquet);;Feather (*.feather);;NumPy (*.npz);;SigMF (*.sigmf-meta *.sigmf-data *.sigmf);;HDF5 (*.h5 *.hdf5);;Specs and sessions (*.yaml *.yml);;All Files (*)")
+            "All Supported (*.raw *.vcd *.csv *.tsv *.txt *.xlsx *.xls *.ods *.pkl *.pickle *.json *.parquet *.feather *.npz *.sigmf-meta *.sigmf *.wav *.flac *.ogg *.opus *.aif *.aiff *.mp3 *.h5 *.hdf5 *.yaml *.yml);;Raw Files (*.raw);;VCD Files (*.vcd);;CSV/TSV (*.csv *.tsv *.txt);;Excel (*.xlsx *.xls *.ods);;Pickle (*.pkl *.pickle);;JSON (*.json);;Parquet (*.parquet);;Feather (*.feather);;NumPy (*.npz);;SigMF (*.sigmf-meta *.sigmf-data *.sigmf);;Audio (*.wav *.flac *.ogg *.opus *.aif *.aiff *.mp3);;HDF5 (*.h5 *.hdf5);;Specs and sessions (*.yaml *.yml);;All Files (*)")
         if fname:
             try:
                 self.openPath(fname)

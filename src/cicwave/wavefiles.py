@@ -78,6 +78,17 @@ _CONTENT_TYPE_EXT = {
     'text/xml': '.xml',
     'application/parquet': '.parquet',
     'application/vnd.apache.parquet': '.parquet',
+    'audio/wav': '.wav',
+    'audio/x-wav': '.wav',
+    'audio/wave': '.wav',
+    'audio/vnd.wave': '.wav',
+    'audio/flac': '.flac',
+    'audio/x-flac': '.flac',
+    'audio/ogg': '.ogg',
+    'audio/opus': '.opus',
+    'audio/mpeg': '.mp3',
+    'audio/aiff': '.aiff',
+    'audio/x-aiff': '.aiff',
 }
 
 
@@ -659,7 +670,9 @@ class WaveFile():
             return self._apply_twos_decode_df(read_sigmf(self.fname))
         ext = os.path.splitext(self.fname)[1].lower()
         reader = self.PANDAS_READERS.get(ext)
-        if reader:
+        if ext in AUDIO_EXTS:
+            df = read_audio(self.fname)
+        elif reader:
             df = reader(self)
         else:
             #- Unknown extensions fall through to the ngspice raw reader,
@@ -731,6 +744,8 @@ class WaveFile():
             return pd.read_xml(_io.BytesIO(self._remote_bytes))
         if ext == '.fwf':
             return pd.read_fwf(_io.BytesIO(self._remote_bytes))
+        if ext in AUDIO_EXTS:
+            return read_audio(_io.BytesIO(self._remote_bytes), ext)
         raise ValueError("unsupported format %r for URL sources" % ext)
 
     def _parse_remote_csv(self, sep):
@@ -1482,6 +1497,160 @@ def read_u32(fname):
         df.insert(0, 'time', time)
     else:
         df.insert(0, 'sample', np.arange(len(df), dtype=np.float64))
+    return df
+
+
+# ---------------------------------------------------------------------------
+# Audio files (.wav natively; .flac/.ogg/.aiff/.mp3/... through soundfile)
+# ---------------------------------------------------------------------------
+
+#: Extensions read as audio. ``.wav`` has its own parser so the common case
+#: needs no extra dependency; the rest go through ``soundfile`` (libsndfile).
+AUDIO_EXTS = ('.wav', '.wave', '.flac', '.ogg', '.oga', '.opus',
+              '.aif', '.aiff', '.aifc', '.mp3', '.au', '.snd', '.caf', '.w64')
+
+_WAV_PCM = 0x0001
+_WAV_FLOAT = 0x0003
+_WAV_EXTENSIBLE = 0xFFFE
+
+
+def _wav_parse(fh):
+    """Return ``(fmt, data_bytes)`` from a RIFF/RIFX/RF64 WAVE stream.
+
+    ``fmt`` holds ``tag``, ``channels``, ``rate``, ``block`` and ``bits``;
+    for ``WAVE_FORMAT_EXTENSIBLE`` the tag is the sub-format's. A ``data``
+    size that overruns the file (streamed recordings that never patched
+    their header) is clamped to what is actually there.
+    """
+    import struct
+
+    head = fh.read(12)
+    if len(head) < 12 or head[8:12] != b'WAVE' \
+            or head[:4] not in (b'RIFF', b'RIFX', b'RF64'):
+        raise ValueError("wav: not a RIFF/WAVE file")
+    endian = '>' if head[:4] == b'RIFX' else '<'
+    fmt = None
+    ds64_data = None
+    while True:
+        ck = fh.read(8)
+        if len(ck) < 8:
+            break
+        cid = ck[:4]
+        size = struct.unpack(endian + 'I', ck[4:])[0]
+        if cid == b'ds64':
+            body = fh.read(size)
+            #- RF64: the real 64-bit data size; the 32-bit field is 0xFFFFFFFF.
+            ds64_data = struct.unpack('<Q', body[8:16])[0]
+        elif cid == b'fmt ':
+            body = fh.read(size)
+            tag, ch, rate, _, block, bits = struct.unpack(
+                endian + 'HHIIHH', body[:16])
+            if tag == _WAV_EXTENSIBLE and len(body) >= 26:
+                tag = struct.unpack(endian + 'H', body[24:26])[0]
+            fmt = {'tag': tag, 'channels': ch, 'rate': rate,
+                   'block': block, 'bits': bits, 'endian': endian}
+        elif cid == b'data':
+            if fmt is None:
+                raise ValueError("wav: data chunk before fmt chunk")
+            if ds64_data is not None and size == 0xFFFFFFFF:
+                size = ds64_data
+            return fmt, fh.read(size)
+        else:
+            fh.seek(size, 1)
+        if size % 2:
+            fh.seek(1, 1)          # chunks are word aligned
+    raise ValueError("wav: no data chunk")
+
+
+def _wav_samples(fmt, data):
+    """Decode WAVE sample bytes to a float ``(n, channels)`` array in full scale.
+
+    Integer PCM is scaled so full scale is ±1 (8-bit is unsigned, offset
+    128); float data is passed through. Returns ``None`` for encodings this
+    parser does not handle (ADPCM, A-law, ...), so the caller can hand the
+    file to soundfile instead.
+    """
+    tag, ch, block, e = fmt['tag'], fmt['channels'], fmt['block'], fmt['endian']
+    if ch <= 0 or block <= 0:
+        raise ValueError("wav: bad fmt chunk (%d channels, block %d)" % (ch, block))
+    width = block // ch
+    n = len(data) // block
+    raw = np.frombuffer(data[:n * block], dtype=np.uint8).reshape(n, ch, width)
+    if tag == _WAV_FLOAT and width in (4, 8):
+        return raw.reshape(n, -1).view(e + 'f%d' % width).astype(np.float64)
+    if tag != _WAV_PCM or width not in (1, 2, 3, 4):
+        return None
+    if width == 1:
+        return (raw[:, :, 0].astype(np.float64) - 128.0) / 128.0
+    if width == 3:
+        #- No 24-bit dtype: left-align into int32 so the sign comes for free.
+        pad = np.zeros((n, ch, 1), dtype=np.uint8)
+        raw = np.concatenate([pad, raw] if e == '<' else [raw, pad], axis=2)
+        width = 4
+    vals = raw.reshape(n, -1).view(e + 'i%d' % width).astype(np.float64)
+    return vals / float(2 ** (8 * width - 1))
+
+
+def _audio_channel_names(nch):
+    if nch == 1:
+        return ['audio']
+    if nch == 2:
+        return ['left', 'right']
+    return ['ch%d' % k for k in range(nch)]
+
+
+def read_audio(src, ext=None):
+    """Load an audio file into a DataFrame.
+
+    *src* is a path or a binary file object (then *ext* names the format).
+    ``.wav`` (PCM 8/16/24/32-bit, 32/64-bit float, RF64, extensible) is
+    parsed here; other formats (FLAC, Ogg Vorbis/Opus, AIFF, MP3, ...)
+    and WAV encodings the parser does not know need ``soundfile``
+    (``pip install cicwave[audio]``).
+
+    Samples are in full scale (±1). There is a ``time`` column in seconds,
+    then ``audio`` for mono, ``left``/``right`` for stereo or ``ch<k>`` for
+    more channels. The sample rate goes in ``df.attrs['cicwave_iq']`` so the
+    FFT and analysis dialogs prefill it, and the format details in
+    ``df.attrs['cicwave_audio']``.
+    """
+    if ext is None:
+        ext = os.path.splitext(str(src))[1]
+    ext = ext.lower()
+    samples = fs = None
+    info = {}
+    if ext in ('.wav', '.wave'):
+        if isinstance(src, (str, os.PathLike)):
+            with open(src, 'rb') as fh:
+                fmt, data = _wav_parse(fh)
+        else:
+            fmt, data = _wav_parse(src)
+            src.seek(0)
+        samples = _wav_samples(fmt, data)
+        fs = float(fmt['rate'])
+        info = {'format': 'WAV', 'bits': fmt['bits'],
+                'encoding': {_WAV_PCM: 'PCM', _WAV_FLOAT: 'FLOAT'}.get(
+                    fmt['tag'], '0x%04x' % fmt['tag'])}
+    if samples is None:
+        try:
+            import soundfile
+        except ImportError:
+            raise ValueError(
+                "reading %s audio needs soundfile: pip install soundfile "
+                "(or cicwave[audio])" % (ext or 'this'))
+        with soundfile.SoundFile(src) as sf:
+            samples = sf.read(dtype='float64', always_2d=True)
+            fs = float(sf.samplerate)
+            info = {'format': sf.format, 'encoding': sf.subtype}
+
+    n, nch = samples.shape
+    cols = {'time': np.arange(n, dtype=np.float64) / fs}
+    for name, k in zip(_audio_channel_names(nch), range(nch)):
+        cols[name] = samples[:, k]
+    df = pd.DataFrame(cols)
+    df.attrs['cicwave_iq'] = {'samp_rate_hz': fs}
+    info.update({'sample_rate_hz': fs, 'channels': nch})
+    df.attrs['cicwave_audio'] = info
     return df
 
 

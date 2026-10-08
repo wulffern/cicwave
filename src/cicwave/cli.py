@@ -404,7 +404,8 @@ def main(files, globs, x, sheet, fmt, pivot, pivot_info, session, export,
 
     Supports: .raw, .csv, .tsv, .xlsx, .json, .parquet, .feather, .npz,
     .h5, .pkl, .vcd (digital), .iqvsa (LitePoint), .stdf (ATE),
-    .u32 (raw counter captures), .sigmf-meta/.sigmf (SigMF IQ), and more.
+    .u32 (raw counter captures), .sigmf-meta/.sigmf (SigMF IQ),
+    .wav/.flac/.ogg/.aiff/.mp3 (audio), and more.
 
     \b
     URL sources:
