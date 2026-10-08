@@ -79,6 +79,12 @@ For the MCP server (agent-driven plotting/analysis; requires Python 3.10+):
 pip install "cicwave[mcp]"
 ```
 
+For FLAC, Ogg, AIFF and MP3 audio (WAV works without it):
+
+```bash
+pip install "cicwave[audio]"
+```
+
 For development installation:
 
 ```bash
