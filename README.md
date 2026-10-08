@@ -42,6 +42,7 @@ repo. As such, you're here.
   - SigMF IQ recordings (`.sigmf-meta` + `.sigmf-data`, or `.sigmf` archives)
   - STDF (`.stdf`, `.stdf.gz`) semiconductor ATE test results
   - Raw `uint32` counter captures (`.u32`) with a JSON sidecar
+  - Audio: `.wav` natively; FLAC, Ogg, AIFF, MP3 with `cicwave[audio]`
   - Statistical formats: Stata (`.dta`), SAS (`.sas7bdat`), SPSS (`.sav`)
 - **URL data sources**: load CSV/JSON/Excel/Parquet/... straight from an
   `http(s)://` URL — REST APIs, hosted datasets, anything pandas can read
@@ -76,6 +77,12 @@ For the MCP server (agent-driven plotting/analysis; requires Python 3.10+):
 
 ```bash
 pip install "cicwave[mcp]"
+```
+
+For FLAC, Ogg, AIFF and MP3 audio (WAV works without it):
+
+```bash
+pip install "cicwave[audio]"
 ```
 
 For development installation:
@@ -166,6 +173,7 @@ through to the ngspice raw reader, so non-standard suffixes (e.g. `.raw0`,
 | SigMF | `.sigmf-meta`, `.sigmf-data`, `.sigmf-data.zip`, `.sigmf` | SigMF recordings (open either half of the pair, or a `.sigmf` archive). A zipped dataset (`<name>.sigmf-data.zip`) is read in place without unpacking. `litepoint:scale` converts counts to analyser units; `litepoint:channel_offset_hz` / `litepoint:spectrum_inverted` put a low-IF capture's FFT on the RF axis. Each recording also gets magnitude views: `mag` (\|iq\|) and `power_dBm` (dBm for LitePoint analyser captures, matching their burst annotations), `power_dBFS` (ADC counts with a stated full scale) or `power_dB`. All `core:datatype`s (`cf32_le`, `ci16_le`, `cu8`, `rf64_be`, …), multi-channel and per-capture header bytes. Gives a complex `iq` column plus `I`/`Q`, a `time` axis from `core:sample_rate`, and the FFT is centred on the first capture's `core:frequency` |
 | STDF | `.stdf`, `.stdf.gz` | Semiconductor ATE test results (SEMI E10/V4) — parametric (PTR) results per part/site, gzip auto-detected |
 | Raw counter | `.u32` | Bare little-endian `uint32` counter records with a `.meta.json` sidecar giving the tick length and periods per sample; converted to Hz or ns on load, with the dead time between capture chunks preserved |
+| Audio | `.wav`, `.flac`, `.ogg`, `.opus`, `.aif`/`.aiff`, `.mp3`, … | Audio recordings. `.wav` is read natively (PCM 8/16/24/32-bit, 32/64-bit float, `WAVE_FORMAT_EXTENSIBLE`, RF64); the other formats need `pip install cicwave[audio]` (soundfile/libsndfile). Samples are in full scale (±1) with a `time` axis in seconds, one column per channel: `audio` (mono), `left`/`right` (stereo) or `ch0`, `ch1`, … The sample rate prefills the FFT and analysis dialogs |
 
 ### Tabular text formats
 

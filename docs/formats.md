@@ -25,6 +25,31 @@ falls through to the ngspice raw reader, so non-standard suffixes (e.g.
 | SigMF | `.sigmf-meta`, `.sigmf-data`, `.sigmf-data.zip`, `.sigmf` | SigMF recordings (open either half of the pair, or a `.sigmf` archive). A zipped dataset (`<name>.sigmf-data.zip`) is read in place without unpacking. `litepoint:scale` converts counts to analyser units; `litepoint:channel_offset_hz` / `litepoint:spectrum_inverted` put a low-IF capture's FFT on the RF axis. Each recording also gets magnitude views: `mag` (\|iq\|) and `power_dBm` (dBm for LitePoint analyser captures, matching their burst annotations), `power_dBFS` (ADC counts with a stated full scale) or `power_dB`. All `core:datatype`s (`cf32_le`, `ci16_le`, `cu8`, `rf64_be`, …), multi-channel and per-capture header bytes. Gives a complex `iq` column plus `I`/`Q`, a `time` axis from `core:sample_rate`, and the FFT is centred on the first capture's `core:frequency` |
 | STDF | `.stdf`, `.stdf.gz` | Semiconductor ATE test results (SEMI E10/V4) — parametric (PTR) results per part/site, gzip auto-detected |
 | Raw counter | `.u32` | Bare little-endian `uint32` counter records with a `.meta.json` sidecar giving the tick length and periods per sample; converted to Hz or ns on load, with the dead time between capture chunks preserved |
+| Audio | `.wav`, `.flac`, `.ogg`, `.opus`, `.aif`/`.aiff`, `.mp3`, … | Audio recordings. `.wav` is read natively (PCM 8/16/24/32-bit, 32/64-bit float, `WAVE_FORMAT_EXTENSIBLE`, RF64); the other formats need `pip install cicwave[audio]` (soundfile/libsndfile). Samples are in full scale (±1) with a `time` axis in seconds, one column per channel: `audio` (mono), `left`/`right` (stereo) or `ch0`, `ch1`, … The sample rate prefills the FFT and analysis dialogs |
+
+### Audio
+
+Open an audio file like any other waveform: `cicwave recording.wav`.
+WAV needs nothing extra; for the other formats install the optional
+dependency:
+
+```bash
+pip install "cicwave[audio]"   # soundfile / libsndfile
+```
+
+| Encoding | WAV (built in) | Through soundfile |
+|----------|----------------|-------------------|
+| PCM 8/16/24/32-bit, float 32/64 | ✓ | ✓ |
+| `WAVE_FORMAT_EXTENSIBLE`, RIFX (big-endian), RF64 (> 4 GB) | ✓ | |
+| ADPCM, A-law, µ-law WAV | | ✓ |
+| FLAC, Ogg Vorbis/Opus, AIFF/AIFC, MP3, AU, CAF, W64 | | ✓ |
+
+The file loads as a `time` column in seconds plus one column per channel:
+`audio` for mono, `left`/`right` for stereo, `ch0`, `ch1`, … beyond that.
+Integer samples are scaled to full scale (±1), so a sine at 0 dBFS peaks
+at 1.0. The sample rate is passed on to the FFT, SNR/ENOB and
+constellation dialogs, and the format details (encoding, bits, channels)
+are kept in `df.attrs['cicwave_audio']`.
 
 ### Tabular text formats
 

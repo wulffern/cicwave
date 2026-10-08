@@ -138,8 +138,8 @@ Right-click a trace in the wave tree for the analysis menu:
 - **Linear fit…**, **Difference (this − other)…**, **X vs Y…**
 - **Constellation (IQ)…**: I/Q scatter of a complex `iq` column, or of an
   `I` column paired with its `Q` (picked for you when the names match).
-  Set the sample rate (prefilled from SigMF / `.npz` sidecar / `.iqvsa`
-  metadata or the time axis), a symbol rate to take one point per symbol
+  Set the sample rate (prefilled from SigMF / `.npz` sidecar / `.iqvsa` /
+  audio file metadata or the time axis), a symbol rate to take one point per symbol
   (fractional samples per symbol are fine), a timing offset in samples to
   land on the symbol centre, and a frequency offset (Hz) and phase to
   derotate a radio's carrier offset. For SigMF recordings with

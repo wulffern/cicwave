@@ -42,6 +42,7 @@ classifiers = [
 [project.optional-dependencies]
 parquet = ["pyarrow"]     # Parquet file support
 hdf5 = ["tables"]         # HDF5 file support
+audio = ["soundfile"]     # FLAC/Ogg/AIFF/MP3 audio (.wav needs nothing)
 mcp = ["mcp[cli]"]        # MCP server (cicwave-mcp); requires Python >= 3.10
 
 [project.scripts]
