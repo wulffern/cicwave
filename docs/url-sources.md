@@ -59,6 +59,7 @@ extension.
 | HTML (first table) | `html` |
 | XML | `xml` |
 | Fixed-width | `fwf` |
+| Audio | `wav`, `flac`, `ogg`, `opus`, `aiff`, `mp3`, … (also from an `audio/*` Content-Type; all but WAV need `cicwave[audio]`) |
 
 `--csv-sep` and `--csv-comment` apply to remote CSV/TSV the same way
 they do to local files — see [Usage](/cicwave/usage#csv-options).

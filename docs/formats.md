@@ -27,6 +27,30 @@ falls through to the ngspice raw reader, so non-standard suffixes (e.g.
 | Raw counter | `.u32` | Bare little-endian `uint32` counter records with a `.meta.json` sidecar giving the tick length and periods per sample; converted to Hz or ns on load, with the dead time between capture chunks preserved |
 | Audio | `.wav`, `.flac`, `.ogg`, `.opus`, `.aif`/`.aiff`, `.mp3`, … | Audio recordings. `.wav` is read natively (PCM 8/16/24/32-bit, 32/64-bit float, `WAVE_FORMAT_EXTENSIBLE`, RF64); the other formats need `pip install cicwave[audio]` (soundfile/libsndfile). Samples are in full scale (±1) with a `time` axis in seconds, one column per channel: `audio` (mono), `left`/`right` (stereo) or `ch0`, `ch1`, … The sample rate prefills the FFT and analysis dialogs |
 
+### Audio
+
+Open an audio file like any other waveform: `cicwave recording.wav`.
+WAV needs nothing extra; for the other formats install the optional
+dependency:
+
+```bash
+pip install "cicwave[audio]"   # soundfile / libsndfile
+```
+
+| Encoding | WAV (built in) | Through soundfile |
+|----------|----------------|-------------------|
+| PCM 8/16/24/32-bit, float 32/64 | ✓ | ✓ |
+| `WAVE_FORMAT_EXTENSIBLE`, RIFX (big-endian), RF64 (> 4 GB) | ✓ | |
+| ADPCM, A-law, µ-law WAV | | ✓ |
+| FLAC, Ogg Vorbis/Opus, AIFF/AIFC, MP3, AU, CAF, W64 | | ✓ |
+
+The file loads as a `time` column in seconds plus one column per channel:
+`audio` for mono, `left`/`right` for stereo, `ch0`, `ch1`, … beyond that.
+Integer samples are scaled to full scale (±1), so a sine at 0 dBFS peaks
+at 1.0. The sample rate is passed on to the FFT, SNR/ENOB and
+constellation dialogs, and the format details (encoding, bits, channels)
+are kept in `df.attrs['cicwave_audio']`.
+
 ### Tabular text formats
 
 | Format | Extension | Description |
