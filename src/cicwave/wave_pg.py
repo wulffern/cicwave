@@ -151,6 +151,67 @@ def _eng(value, unit=""):
     return fmt(value)
 
 
+#- SI prefixes a unit can already carry, as in a CSV scaled to uA.
+_UNIT_PREFIXES = "fpnuµmkMG"
+
+
+def _hist_value(value, unit=""):
+    """Format a histogram statistic without inventing a second prefix.
+
+    Only a base unit gets an engineering prefix: 8.3e-7 with A reads
+    830 nA. A value in uA is already scaled, and ``_eng`` would turn 0.83
+    into 830 muA. Without a unit there is nothing to attach a prefix to,
+    and 830 m says less than 0.83.
+    """
+    if not unit:
+        return "%.4g" % value
+    if len(unit) > 1 and unit[0] in _UNIT_PREFIXES:
+        return "%.4g %s" % (value, unit)
+    return _eng(value, unit)
+
+
+def _histogram_data(y):
+    """Return bin counts, bin edges, mean and sigma, and the fit curve."""
+    n = len(y)
+    counts, edges = np.histogram(y, bins=max(10, n // 100))
+    mu = np.mean(y)
+    sigma = np.std(y)
+    xfit = yfit = None
+    if sigma > 0:
+        xfit = np.linspace(edges[0], edges[-1], 200)
+        yfit = np.max(counts) * np.exp(-0.5 * ((xfit - mu) / sigma) ** 2)
+    return counts, edges, mu, sigma, xfit, yfit
+
+
+def _histogram_label(name, unit):
+    return "%s [%s]" % (name, unit) if unit else name
+
+
+def _export_histogram(fname, name, y, unit="", title=None):
+    """Write the same histogram as the analysis tab to PDF/PNG/SVG."""
+    import matplotlib.pyplot as plt
+
+    counts, edges, mu, sigma, xfit, yfit = _histogram_data(y)
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.bar((edges[:-1] + edges[1:]) / 2.0, counts,
+           width=(edges[1] - edges[0]) * 0.85, color='#3a86c8')
+    if xfit is not None:
+        ax.plot(xfit, yfit, color='#cc2222', linewidth=1.5)
+    ax.set_xlabel(_histogram_label(name, unit))
+    ax.set_ylabel("Count")
+    if title:
+        ax.set_title(title)
+    ax.text(0.02, 0.96, "μ = %s\nσ = %s\nn = %d" % (
+        _hist_value(mu, unit), _hist_value(sigma, unit), len(y)),
+        transform=ax.transAxes, va='top',
+        bbox=dict(facecolor='white', edgecolor='none', alpha=0.8))
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    dpi = 150 if fname.lower().endswith('.png') else None
+    fig.savefig(fname, dpi=dpi, facecolor='white')
+    plt.close(fig)
+
+
 def _to_numeric(arr):
     """Convert array to float. For string data, return (indices, labels)."""
     try:
@@ -209,6 +270,11 @@ def _apply_rotated_ticks(plot_item, axis_name, ticks):
     plot_item.axes[axis_name]['item'] = new_ax
     plot_item.layout.addItem(new_ax, 3 if axis_name == 'bottom' else 1, 1)
     new_ax.setZValue(-1000)
+
+
+#- Most stat lines and legend entries an exported figure has room for.
+_EXPORT_MAX_STATS = 3
+_EXPORT_MAX_LEGEND = 12
 
 
 class _SignalPickerDialog(QDialog):
@@ -2163,6 +2229,10 @@ class PgWavePlot(QWidget):
         theme = _get_theme()
         ecolors = theme['export_colors']
 
+        #- The same signal from several files is an overlay, and a legend
+        #- of identical names can't say which line is which.
+        keys = [self.wave_data[t][0].key for t in tags]
+
         for i, tag in enumerate(tags):
             wave, yunit = self.wave_data[tag]
             if wave.x is None or wave.y is None:
@@ -2185,7 +2255,11 @@ class PgWavePlot(QWidget):
             else:
                 units_left.add(yunit)
 
-            kw = dict(color=color, linewidth=1.5, label=wave.key)
+            label = wave.key
+            if keys.count(wave.key) > 1:
+                label = "%s (%s)" % (wave.key, os.path.splitext(
+                    os.path.basename(wave.wfile.name))[0])
+            kw = dict(color=color, linewidth=1.5, label=label)
             if style == 'Markers':
                 kw.update(linestyle='none', marker='o', markersize=4)
             elif style == 'Lines+Markers':
@@ -2244,7 +2318,8 @@ class PgWavePlot(QWidget):
 
         stats = self.getStats()
         export_notes = []
-        if stats:
+        #- Past a few waves the block grows up into the axes.
+        if len(stats) <= _EXPORT_MAX_STATS:
             for s in stats:
                 u = s['unit']
                 export_notes.append("%s: μ=%s σ=%s rms=%s" % (
@@ -2262,7 +2337,7 @@ class PgWavePlot(QWidget):
             r_lines, r_labels = ax_right.get_legend_handles_labels()
             lines += r_lines
             labels += r_labels
-        if labels:
+        if labels and len(labels) <= _EXPORT_MAX_LEGEND:
             ax.legend(lines, labels, fontsize=7, loc='best')
 
         ax.grid(True, alpha=0.3)
@@ -3052,6 +3127,20 @@ class PgWavePlot(QWidget):
 class PgAnalysisPlot(QWidget):
     """Lightweight analysis tab with basic A/B cursors and readout."""
 
+    def exportPdf(self):
+        """File > Export for the analyses that know how to, histogram only."""
+        if not self.histogram:
+            return
+        fname, _ = QFileDialog.getSaveFileName(
+            self, "Export PDF", os.getcwd(),
+            "PDF files (*.pdf);;PNG files (*.png);;SVG files (*.svg)")
+        if fname:
+            self.exportHistogram(fname)
+
+    def exportHistogram(self, fname):
+        h = self.histogram
+        _export_histogram(fname, h['name'], h['y'], h['unit'], h['title'])
+
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
@@ -3080,6 +3169,7 @@ class PgAnalysisPlot(QWidget):
 
         self._apply_panel_style()
 
+        self.histogram = None
         self.cursor_a = None
         self.cursor_b = None
         self._cursor_a_line = None
@@ -4062,6 +4152,18 @@ class PgWaveWindow(QMainWindow):
         plots = []
         for ti in range(self.tab_widget.count()):
             widget = self.tab_widget.widget(ti)
+            hist = getattr(widget, 'histogram', None)
+            if hist and hist['wave'] is not None:
+                fi = wf_to_idx.get(id(hist['wave'].wfile))
+                plot_dict = {'name': self.tab_widget.tabText(ti),
+                             'analysis': 'histogram',
+                             'waves': [{'file': fi, 'name': hist['name']}]}
+                if hist['unit']:
+                    plot_dict['unit'] = hist['unit']
+                if hist['title']:
+                    plot_dict['title'] = hist['title']
+                plots.append(plot_dict)
+                continue
             if not isinstance(widget, PgWavePlot):
                 continue
             tab_name = self.tab_widget.tabText(ti)
@@ -4164,7 +4266,12 @@ class PgWaveWindow(QMainWindow):
 
         session_dir = os.path.dirname(os.path.abspath(session_path))
 
+        #- What each entry of ``files`` opened as, so a wave's ``file``
+        #- index finds its own file. None for one that failed to load.
+        file_keys = []
+
         for fe in session.get('files', []):
+            file_keys.append(None)
             #- ``source:`` names a pivot spec that fetches its own data,
             #- so there is no separate ``path:`` to resolve.
             from_source = 'source' in fe
@@ -4195,6 +4302,7 @@ class PgWaveWindow(QMainWindow):
                         self.browser.openLazyFrame(
                             os.path.basename(fpath), catalog.load(),
                             catalog.load_group, pivot_spec_path=spec_ref)
+                        file_keys[-1] = self.browser.files.current
                         continue
                     xaxis = self.browser.xaxis or spec.get('columns', '')
                     if not self.browser.xaxis and spec.get('columns'):
@@ -4212,12 +4320,17 @@ class PgWaveWindow(QMainWindow):
                         source_spec=from_source)
                 else:
                     self.browser.openFile(fpath, fmt=fmt)
+                file_keys[-1] = self.browser.files.current
             except Exception as e:
                 QMessageBox.critical(
                     self, "Open File",
                     "Failed to load %s:\n%s" % (fpath, e))
 
         for pd in session.get('plots', []):
+            if pd.get('analysis') == 'histogram':
+                self._restore_histogram(pd, file_keys)
+                continue
+
             tab_idx = self.tab_widget.count() - 1
             p = self.tab_widget.widget(tab_idx)
             if p is None or (isinstance(p, PgWavePlot) and p.wave_data):
@@ -4235,7 +4348,7 @@ class PgWaveWindow(QMainWindow):
                 #- group is fetched; one request, not the whole catalog.
                 if wd.get('group'):
                     self._fetch_session_group(wd['group'])
-                wave = self._find_wave(wave_name)
+                wave = self._find_wave(wave_name, wd.get('file'), file_keys)
                 if wave:
                     bits = wd.get('twos_complement_bits')
                     if bits is not None:
@@ -4283,6 +4396,29 @@ class PgWaveWindow(QMainWindow):
                     xv = math.log10(xv)
                 p._set_cursor(which[-1], xv)
 
+    def _restore_histogram(self, pd, file_keys):
+        """Open the histogram tab a session asks for."""
+        wd = (pd.get('waves') or [{}])[0]
+        wave = self._find_wave(wd.get('name'), wd.get('file'), file_keys)
+        if wave is None:
+            return
+        wave.reload()
+        y, _ = _to_numeric(wave.y)
+        y = y[np.isfinite(y)]
+        #- The window opens with an empty plot tab; a session of only
+        #- histograms has no use for it.
+        last = self.tab_widget.widget(self.tab_widget.count() - 1)
+        drop_empty = isinstance(last, PgWavePlot) and not last.wave_data
+        self._do_histogram(wave.key, y, pd.get('unit', wave.yunit), wave=wave,
+                           title=pd.get('title'))
+        if drop_empty and self.tab_widget.count() > 1:
+            self.tab_widget.removeTab(self.tab_widget.indexOf(last))
+            last.deleteLater()
+        if pd.get('name') and getattr(
+                self.tab_widget.currentWidget(), 'histogram', None):
+            self.tab_widget.setTabText(
+                self.tab_widget.currentIndex(), pd['name'])
+
     def _fetch_session_group(self, group):
         """Fetch a catalog group a session's plot needs, if still pending."""
         for wf in self.browser.files.values():
@@ -4296,9 +4432,20 @@ class PgWaveWindow(QMainWindow):
                 self.browser._fill_waves()
                 return
 
-    def _find_wave(self, name):
-        """Look up a PgWave by column name across all loaded files."""
-        for fkey, wf in self.browser.files.items():
+    def _find_wave(self, name, file_index=None, file_keys=()):
+        """Look up a PgWave by column name.
+
+        With a session's ``file`` index, only that file is searched: the
+        same signal in several files is the point of an overlay. Without
+        one, the first file that has the name wins.
+        """
+        files = self.browser.files
+        if file_index is not None:
+            if not 0 <= file_index < len(file_keys):
+                return None
+            key = file_keys[file_index]
+            files = {key: files[key]} if key in files else {}
+        for fkey, wf in files.items():
             for wn in wf.getWaveNames():
                 if wn == name:
                     tag = wf.getTag(wn)
@@ -4365,7 +4512,7 @@ class PgWaveWindow(QMainWindow):
             self._do_fft(wave.key, x, y_fft, wave.xunit, wave.yunit,
                           dbfs_amplitude=None, freq_offset_hz=freq_offset_hz)
         elif atype == "histogram":
-            self._do_histogram(wave.key, y, wave.yunit)
+            self._do_histogram(wave.key, y, wave.yunit, wave=wave)
         elif atype == "differentiate":
             self._do_differentiate(wave.key, x, y, wave.xunit, wave.yunit)
         elif atype == "linfit":
@@ -4761,34 +4908,31 @@ class PgWaveWindow(QMainWindow):
         w.setLabel('bottom', wave_a.xlabel or 'x')
         w.setLabel('left', "Δ (%s)" % wave_a.key)
 
-    def _do_histogram(self, name, y, yunit):
+    def _do_histogram(self, name, y, yunit, wave=None, title=None):
         n = len(y)
         if n < 2:
             return
 
-        nbins = max(10, n // 100)
-        counts, edges = np.histogram(y, bins=nbins)
+        counts, edges, mu, sigma, xfit, yfit = _histogram_data(y)
         centers = (edges[:-1] + edges[1:]) / 2.0
 
-        mu = np.mean(y)
-        sigma = np.std(y)
-
         w = self._add_analysis_tab("Hist: %s" % name)
+        w.histogram = dict(name=name, y=y, unit=yunit, title=title, wave=wave)
         bar = pg.BarGraphItem(x=centers, height=counts,
                               width=(edges[1] - edges[0]) * 0.85,
                               brush='c', pen='w')
         w.addItem(bar)
 
-        if sigma > 0:
-            xfit = np.linspace(edges[0], edges[-1], 200)
-            scale = np.max(counts)
-            gauss = scale * np.exp(-0.5 * ((xfit - mu) / sigma) ** 2)
-            w.plot(xfit, gauss, pen=pg.mkPen('r', width=2))
+        if xfit is not None:
+            w.plot(xfit, yfit, pen=pg.mkPen('r', width=2))
 
-        w.setLabel('bottom', yunit if yunit else name)
+        w.setLabel('bottom', _histogram_label(name, yunit))
         w.setLabel('left', 'Count')
-        txt = pg.TextItem("μ = %s\nσ = %s" % (_eng(mu, yunit), _eng(sigma, yunit)),
-                          color=_get_theme()['text_color'], anchor=(0, 1))
+        if title:
+            w.pw.plotItem.setTitle(title)
+        txt = pg.TextItem("μ = %s\nσ = %s" % (_hist_value(mu, yunit),
+                                              _hist_value(sigma, yunit)),
+                          color=_get_theme()['text_color'], anchor=(0, 0))
         w.addItem(txt, ignoreBounds=True)
 
         _busy = [False]
@@ -5271,6 +5415,26 @@ class CmdWavePg:
                     for i in range(self.win.tab_widget.count())
                     if isinstance(self.win.tab_widget.widget(i), PgWavePlot)
                     and self.win.tab_widget.widget(i).wave_data]
+
+        #- A histogram tab from the session is exported the same way as a
+        #- plot tab: first exportable tab, suffixed when there are several.
+        for ti in range(self.win.tab_widget.count()):
+            widget = self.win.tab_widget.widget(ti)
+            if not getattr(widget, 'histogram', None):
+                continue
+            if isinstance(self.win.tab_widget.widget(0), PgWavePlot) and \
+                    self.win.tab_widget.widget(0).wave_data:
+                break
+            if fname:
+                out = (_tab_suffixed(fname, ti)
+                       if self.win.tab_widget.count() > 1 else fname)
+                widget.exportHistogram(out)
+                print("Exported: %s" % out)
+            if data_fname:
+                print("--export-data does not cover histograms",
+                      file=sys.stderr)
+            self.app.quit()
+            return
 
         if not _plotted():
             #- Headless export of a plain file: nothing has been selected, so

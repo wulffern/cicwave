@@ -81,6 +81,31 @@ plots:
         style: Lines
 ```
 
+## Histogram
+
+A histogram of a column, for example Monte Carlo results with one row per run:
+
+```yaml
+files:
+  - path: results/tran_Sch_mc.csv
+plots:
+  - name: Monte Carlo
+    title: Output current
+    analysis: histogram
+    unit: uA
+    waves:
+      - file: 0
+        name: ibns_20u
+```
+
+```bash
+cicwave --session mc.cicwave.yaml --export mc.png
+```
+
+The GUI gets there by right clicking a wave and selecting Histogram. Export it with
+File → Export PDF, and Ctrl+S keeps it in the session. `--export-data` does not
+cover histograms.
+
 ## Session file reference
 
 **`files`** — list of data files to load:
@@ -103,6 +128,8 @@ plots:
 | `xlabel` | no | Custom x-axis label |
 | `ylabel` | no | Custom y-axis label |
 | `waves` | yes | List of waves to plot (see below) |
+| `analysis` | no | `histogram` opens the distribution of the first wave instead of a plot, and `--export` writes it |
+| `unit` | no | Unit of a histogram, for a file that doesn't carry one. A prefixed unit such as `uA` is taken as already scaled |
 | `annotations` | no | List of text annotations (see below) |
 | `xrange`, `yrange` | no | `[min, max]` zoom range to restore, in pyqtgraph's own view coordinates (log10-space on the x-axis for a log-x plot) |
 | `cursor_a`, `cursor_b` | no | Cursor A/B position, in real data coordinates (like `annotations`, not view coordinates) |
